@@ -102,9 +102,13 @@ class WorkloadInventory(BaseModel):
     backup_size_gb: Optional[float] = None
     dr_size_gb: Optional[float] = None
 
+    # Ratios (used for derived fields; mirrors benchmark K11/K12 but stored on the workload
+    # so each workload can have its own ratio if needed)
+    vm_to_server_ratio: float = Field(12.0, description="Benchmark K11: VM-to-physical-server ratio")
+
     # License inventory
     byol_virtualization_for_avs: YesNo = YesNo.NO
-    vcpu_per_core_ratio: float = Field(1.97, description="vHost tab, avg column Y")
+    vcpu_per_core_ratio: float = Field(1.97, description="vHost tab, avg column Y (vCPUs per pCore)")
     pcores_with_windows_server: int = Field(0, ge=0, description="vInfo filtered to Windows OS, sum CPU / vcpu_per_core_ratio")
     pcores_with_windows_esu: int = Field(0, ge=0, description="ESU-eligible Windows (pre-2012)")
     pcores_with_sql_server: Optional[int] = None   # defaults to 10% of windows_server if None
@@ -125,8 +129,8 @@ class WorkloadInventory(BaseModel):
 
     @property
     def est_physical_servers_incl_hosts(self) -> float:
-        """Estimated total physical servers including VM hosts."""
-        return self.num_vms / max(self.vcpu_per_core_ratio, 0.01) + self.num_physical_servers_excl_hosts
+        """Estimated total physical servers including VM hosts (workbook D42 = D39/K11 + D40)."""
+        return self.num_vms / max(self.vm_to_server_ratio, 0.01) + self.num_physical_servers_excl_hosts
 
     @property
     def est_allocated_pcores_incl_hosts(self) -> float:
