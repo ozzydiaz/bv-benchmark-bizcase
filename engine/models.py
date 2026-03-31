@@ -100,7 +100,9 @@ class WorkloadInventory(BaseModel):
 
     # Backup / DR (populated if options activated)
     backup_size_gb: Optional[float] = None
+    backup_num_protected_vms: Optional[int] = None   # defaults to num_vms + num_physical_servers_excl_hosts
     dr_size_gb: Optional[float] = None
+    dr_num_protected_vms: Optional[int] = None        # defaults to num_vms + num_physical_servers_excl_hosts
 
     # Ratios (used for derived fields; mirrors benchmark K11/K12 but stored on the workload
     # so each workload can have its own ratio if needed)
@@ -109,17 +111,24 @@ class WorkloadInventory(BaseModel):
     # License inventory
     byol_virtualization_for_avs: YesNo = YesNo.NO
     vcpu_per_core_ratio: float = Field(1.97, description="vHost tab, avg column Y (vCPUs per pCore)")
+    pcores_with_virtualization: Optional[int] = Field(None, ge=0, description="pCores running virtualization SW; defaults to allocated_vcpu / vcpu_per_core_ratio")
     pcores_with_windows_server: int = Field(0, ge=0, description="vInfo filtered to Windows OS, sum CPU / vcpu_per_core_ratio")
     pcores_with_windows_esu: int = Field(0, ge=0, description="ESU-eligible Windows (pre-2012)")
     pcores_with_sql_server: Optional[int] = None   # defaults to 10% of windows_server if None
     pcores_with_sql_esu: Optional[int] = None       # defaults to 10% of windows_esu if None
 
     @model_validator(mode="after")
-    def derive_sql_defaults(self) -> "WorkloadInventory":
+    def derive_defaults(self) -> "WorkloadInventory":
+        if self.pcores_with_virtualization is None:
+            self.pcores_with_virtualization = round(self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01))
         if self.pcores_with_sql_server is None:
             self.pcores_with_sql_server = round(self.pcores_with_windows_server * 0.10)
         if self.pcores_with_sql_esu is None:
             self.pcores_with_sql_esu = round(self.pcores_with_windows_esu * 0.10)
+        if self.backup_num_protected_vms is None:
+            self.backup_num_protected_vms = self.total_vms_and_physical
+        if self.dr_num_protected_vms is None:
+            self.dr_num_protected_vms = self.total_vms_and_physical
         return self
 
     # Derived fields (computed, not entered)
@@ -137,8 +146,8 @@ class WorkloadInventory(BaseModel):
         return self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01) + self.allocated_pcores_excl_hosts
 
     @property
-    def pcores_with_virtualization(self) -> float:
-        """Physical cores running virtualization software."""
+    def _pcores_with_virt_derived(self) -> float:
+        """Fallback derived value; actual field pcores_with_virtualization takes precedence."""
         return self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01)
 
 
