@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+
+# Pytest
+.pytest_cache/
+.coverage
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Reference workbook and RVtools exports — large binaries, not committed
+*.xlsm
+*.xlsb
+*.xlsx
+RVTools_*.xlsx
+
+# Secrets
+*.env
+secrets.toml

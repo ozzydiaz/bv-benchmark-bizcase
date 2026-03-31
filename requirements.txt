@@ -1,0 +1,8 @@
+openpyxl>=3.1
+pydantic>=2.0
+pyyaml>=6.0
+streamlit>=1.35
+plotly>=5.20
+pandas>=2.2
+pytest>=8.0
+oletools>=0.60
