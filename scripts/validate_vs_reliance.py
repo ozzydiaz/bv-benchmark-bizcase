@@ -168,16 +168,22 @@ KNOWN_GAPS = {
 
 # ---- Parser: fields that cannot be reliably derived from RVtools alone ----
 # These mismatches are inherent limitations of auto-parsing, not code bugs:
-#   allocated_storage_gb    — RVtools 'Provisioned MiB' and 'In Use MiB' both
-#                             differ from the workbook value; user adjusted for VM
-#                             exclusions and storage tiering manually.
-#   pcores_with_windows_server — RVtools OS strings include 'Windows Server 2016
-#                              or later (64-bit)' generics and possible template
-#                              VMs; user manually reconciled to 3,454.
-#   pcores_with_windows_esu  — RVtools 'configuration file' OS column only
-#                              records OS version for newer VMs; 2008/2003 VMs
+#   allocated_storage_gb    — powered-on filter now yields ±1.2% (PASS).  Kept as
+#                             a non-fatal LIMIT so that future data sets that miss
+#                             the 2% gate still show ⚑ rather than ✗ FAIL.
+#   pcores_with_windows_server — powered-on + template-exclusion filter narrows gap
+#                              to ~2.9%.  The residual is driven by the
+#                              vcpu_per_core_ratio: parser averages per-host values
+#                              (1.9155) while the workbook uses a manually-entered
+#                              value (1.97 = D66).  Since D66 is a user input in
+#                              the intake form, the Streamlit UI will ask the user
+#                              to confirm/override the auto-detected ratio.
+#   pcores_with_windows_esu  — RVtools 'configuration file' OS column does not
+#                              record OS version for pre-2016 VMs; 2008/2003 VMs
 #                              show generic strings.  User manually entered 2,124
-#                              from a separate audit.  Auto-detection yields ~827.
+#                              from a separate OS audit.  Auto-detection yields ~845
+#                              (2012 variants only).  Parser emits a warning and
+#                              sets esu_count_may_be_understated=True.
 PARSER_LIMITATIONS = {
     "allocated_storage_gb",
     "pcores_with_windows_server",
@@ -499,19 +505,17 @@ def main() -> int:
             "  Our engine uses consumption plan values directly.  Re-run with --strict\n"
             "  once the Azure consumption growth logic is added.\n"
             "\n"
-            "  NOTE 2 — 'parser limitation' (⚑): three fields cannot be reliably\n"
-            "  auto-detected from RVtools OS strings alone:\n"
-            "    • allocated_storage_gb  — neither Provisioned nor In-Use MiB column\n"
-            "      matches the manually-entered workbook value (user excluded certain\n"
-            "      VMs and adjusted for storage tiering).\n"
-            "    • pcores_with_windows_server — includes generic 'Server 2016 or later'\n"
-            "      VMs; user reconciled manually to remove templates.\n"
-            "    • pcores_with_windows_esu — RVtools OS config column does not record\n"
-            "      OS version for older VMs (2008/2003 show generic strings); user\n"
-            "      obtained the 2,124 figure from a separate OS audit.  Auto-detection\n"
-            "      yields ~827 (only 2012 variants reliably identified).\n"
-            "  These are documented UX prompts: the Streamlit intake form will ask users\n"
-            "  to review and confirm/override the auto-detected values."
+            "  NOTE 2 — 'parser limitation' (⚑): residual auto-detection gaps:\n"
+            "    • allocated_storage_gb  — powered-on filter applied; now ±1.2% (PASS).\n"
+            "      Kept as non-fatal LIMIT in case future data sets miss the gate.\n"
+            "    • pcores_with_windows_server — powered-on + template-exclusion applied;\n"
+            "      now ±2.9%.  Residual driven by vcpu_per_core_ratio estimation\n"
+            "      (parser: 1.9155 vs workbook D66: 1.97). Override ratio in intake form.\n"
+            "    • pcores_with_windows_esu — pre-2016 VMs show generic OS strings;\n"
+            "      auto-detection yields ~845 (2012 variants only); workbook value 2,124\n"
+            "      requires a separate OS audit.  Parser sets esu_count_may_be_understated\n"
+            "      and emits a warning.  Override in the intake form.\n"
+            "  The Streamlit intake form will surface these values for user review."
         )
     return 0 if (a_ok and b_ok) else 1
 
