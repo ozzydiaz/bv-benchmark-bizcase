@@ -6,3 +6,4 @@ plotly>=5.20
 pandas>=2.2
 pytest>=8.0
 oletools>=0.60
+python-pptx>=1.0

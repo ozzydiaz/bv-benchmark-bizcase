@@ -17,7 +17,7 @@ st.set_page_config(
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["1 · Client Intake", "2 · Consumption Plan", "3 · Benchmarks", "4 · Results"],
+    ["1 · Client Intake", "2 · Consumption Plan", "3 · Benchmarks", "4 · Results", "5 · Export"],
 )
 
 if page == "1 · Client Intake":
@@ -32,3 +32,6 @@ elif page == "3 · Benchmarks":
 elif page == "4 · Results":
     from app.pages import results
     results.render()
+elif page == "5 · Export":
+    from app.pages import export_page
+    export_page.render()
