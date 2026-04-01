@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 
 from .models import BenchmarkConfig, BusinessCaseInputs, YesNo
 from .status_quo import StatusQuoCosts, YEARS
+from .productivity import compute as _compute_productivity
 
 
 @dataclass
@@ -82,51 +83,94 @@ def compute(
     """
     Compute the on-prem costs that persist during the Azure scenario's migration ramp.
 
-    For each cost category, retained cost = status_quo_cost × (1 - migration_ramp_pct).
-    DC facilities use DC-exit-type logic ('Proportional' vs 'Static').
+    Billing-model conventions (validated against workbook 'Cash Flow Output - Detailed'):
+
+      Hardware maintenance  — current-year ramp; terminates the moment servers leave.
+      DC facilities         — lagged ramp (current sq value); physical space can't be
+                             vacated the same day VMs migrate.
+      Virtualization        — lagged ramp + lagged sq (yr-1); annual subscription,
+                             cancel takes effect next renewal.
+      Windows/SQL licenses  — BYOL/AHB: SA obligations persist regardless of ramp;
+                             cost = prior-year sq value (renewal priced at prior year).
+      Windows/SQL ESU       — lagged ramp + lagged sq; drops to $0 once in Azure
+                             (AHB provides free ESU coverage).
+      Backup/DR software    — lagged ramp + lagged sq; annual subscription renewal.
+      IT admin              — lagged ramp + lagged sq + productivity floor from D31.
+      Backup/DR storage     — lagged ramp + lagged sq; on-prem infrastructure persists
+                             through transition year before Azure Backup takes over.
     """
     retained = RetainedCosts()
-    g = inputs.hardware.expected_future_growth_rate
     plans = inputs.consumption_plans
     dc_exit = inputs.datacenter.dc_exit_type.value  # 'Static' or 'Proportional'
 
+    # Pre-compute productivity benefit for IT admin floor (D31 toggle)
+    pb = _compute_productivity(inputs, benchmarks)
+    # Azure IT admin floor: baseline headcount minus headcount saved = what remains in cloud
+    azure_it_floor = max(0.0, status_quo.system_admin_staff[0] - pb.annual_benefit_full)
+
     for yr in range(YEARS + 1):
+        # ── current-year ramp (hardware: terminates immediately on migration) ──
         avg_ramp = _combined_ramp(plans, yr)
-        on_prem_fraction = 1.0 - avg_ramp
+        hw_fraction = 1.0 - avg_ramp
 
-        # Proportional: DC costs reduce in proportion to migration progress
-        # Static: DC costs stay flat until fully migrated (then drop to zero)
+        # ── lagged ramp (everything else: 1-year billing lag) ──
+        prev_yr = max(0, yr - 1)
+        lagged_ramp = _combined_ramp(plans, prev_yr)
+        lagged_fraction = 1.0 - lagged_ramp
+
+        # DC fraction: Proportional or Static exit type (both use lagged ramp)
         if dc_exit == "Proportional":
-            dc_fraction = on_prem_fraction
+            dc_fraction = lagged_fraction
         else:  # Static
-            dc_fraction = 0.0 if avg_ramp >= 1.0 else 1.0
+            dc_fraction = 0.0 if lagged_ramp >= 1.0 else 1.0
 
-        # --- License costs: decline per-workload proportionally ---
-        retained.virtualization_licenses[yr] = status_quo.virtualization_licenses[yr] * on_prem_fraction
-        retained.windows_server_licenses[yr] = status_quo.windows_server_licenses[yr] * on_prem_fraction
-        retained.sql_server_licenses[yr] = status_quo.sql_server_licenses[yr] * on_prem_fraction
-        retained.windows_esu[yr] = status_quo.windows_esu[yr] * on_prem_fraction
-        retained.sql_esu[yr] = status_quo.sql_esu[yr] * on_prem_fraction
-        retained.backup_software[yr] = status_quo.backup_software[yr] * on_prem_fraction
-        retained.dr_software[yr] = status_quo.dr_software[yr] * on_prem_fraction
+        # ── Hardware maintenance — terminates when migrated ──
+        retained.server_maintenance[yr]  = status_quo.server_maintenance[yr]  * hw_fraction
+        retained.storage_maintenance[yr] = status_quo.storage_maintenance[yr] * hw_fraction
+        retained.network_maintenance[yr] = status_quo.network_maintenance[yr] * hw_fraction
 
-        # --- IT admin: declines with migration ---
-        retained.system_admin_staff[yr] = status_quo.system_admin_staff[yr] * on_prem_fraction
-
-        # --- DC facilities: depend on exit type ---
+        # ── DC facilities — 1-year lag (physical space persists through migration year) ──
         retained.dc_lease_space[yr] = status_quo.dc_lease_space[yr] * dc_fraction
-        retained.dc_power[yr] = status_quo.dc_power[yr] * dc_fraction
+        retained.dc_power[yr]       = status_quo.dc_power[yr]       * dc_fraction
+        retained.bandwidth[yr]      = status_quo.bandwidth[yr]      * dc_fraction
 
-        # --- Bandwidth: eliminated when DC exited ---
-        retained.bandwidth[yr] = status_quo.bandwidth[yr] * dc_fraction
+        # ── Virtualization — annual subscription, 1-year lag ──
+        retained.virtualization_licenses[yr] = (
+            status_quo.virtualization_licenses[prev_yr] * lagged_fraction
+        )
 
-        # --- Hardware maintenance: declines as servers leave ---
-        retained.server_maintenance[yr] = status_quo.server_maintenance[yr] * on_prem_fraction
-        retained.storage_maintenance[yr] = status_quo.storage_maintenance[yr] * on_prem_fraction
-        retained.network_maintenance[yr] = status_quo.network_maintenance[yr] * on_prem_fraction
+        # ── Windows / SQL Server licenses — BYOL/AHB: SA obligation persists in Azure ──
+        # License renewals are priced at the prior-year pCore count; the obligation
+        # does not disappear when VMs move to Azure (you still pay SA to use AHB).
+        retained.windows_server_licenses[yr] = status_quo.windows_server_licenses[prev_yr]
+        retained.sql_server_licenses[yr]     = status_quo.sql_server_licenses[prev_yr]
 
-        # --- Backup / DR storage (on-prem): declines with migration ---
-        retained.backup_storage_cost[yr] = status_quo.backup_storage_cost[yr] * on_prem_fraction
-        retained.dr_storage_cost[yr] = status_quo.dr_storage_cost[yr] * on_prem_fraction
+        # ── Windows / SQL ESU — 1-year lag; covered free by AHB once in Azure ──
+        retained.windows_esu[yr] = status_quo.windows_esu[prev_yr] * lagged_fraction
+        retained.sql_esu[yr]     = status_quo.sql_esu[prev_yr]     * lagged_fraction
+
+        # ── Backup / DR software — annual subscription, 1-year lag ──
+        retained.backup_software[yr] = status_quo.backup_software[prev_yr] * lagged_fraction
+        retained.dr_software[yr]     = status_quo.dr_software[prev_yr]     * lagged_fraction
+
+        # ── IT admin — 1-year lag + D31 productivity floor ──
+        sq_it_prev = status_quo.system_admin_staff[prev_yr]
+        if inputs.incorporate_productivity_benefit == YesNo.YES:
+            retained.system_admin_staff[yr] = max(
+                sq_it_prev * lagged_fraction, azure_it_floor
+            )
+        else:
+            retained.system_admin_staff[yr] = sq_it_prev * lagged_fraction
+
+        # ── Backup / DR storage — 1-year lag ──
+        # When in Azure Consumption: Y0/Y1 = full on-prem cost (transition period),
+        # then drops to 0 once migration is complete (billed via Azure Consumption).
+        # When not in Azure Consumption: declines proportionally with ramp.
+        retained.backup_storage_cost[yr] = (
+            status_quo.backup_storage_cost[prev_yr] * lagged_fraction
+        )
+        retained.dr_storage_cost[yr] = (
+            status_quo.dr_storage_cost[prev_yr] * lagged_fraction
+        )
 
     return retained

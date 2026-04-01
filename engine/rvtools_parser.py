@@ -109,7 +109,35 @@ class RVToolsInventory:
     num_vms_poweredon: int = 0
     total_vcpu_poweredon: int = 0
     total_vmemory_gb_poweredon: float = 0.0
-    total_storage_poweredon_gb: float = 0.0  # powered-on In Use MiB / 953.67
+    total_storage_poweredon_gb: float = 0.0  # powered-on In Use MiB / 953.67 (on-prem TCO basis)
+
+    # Provisioned disk capacity from vDisk tab — used for Azure managed disk cost estimation.
+    # Azure bills on provisioned tier size, not consumed bytes.  If vDisk tab is absent
+    # these remain 0.0 and consumption_builder falls back to in-use × headroom.
+    total_disk_provisioned_gb: float = 0.0        # all VMs, vDisk.Capacity MiB sum / 953.67
+    total_disk_provisioned_poweredon_gb: float = 0.0  # powered-on VMs only
+    # Per-VM disk layout for per-VM managed disk tier costing.
+    # Keys are VM names; values are lists of provisioned sizes in GiB (float).
+    # Populated only for powered-on, non-template VMs.  Empty when vDisk tab absent.
+    vm_disk_sizes_gb: dict[str, list[float]] = field(default_factory=dict)
+
+    # ── UTILISATION TELEMETRY (from vCPU and vMemory tabs) ──
+    # Values are fleet P95 fractions (0–1+); 0.0 = telemetry not available.
+    # powered-on VMs only; powered-off VMs (Overall==0) are excluded.
+    cpu_util_p95: float = 0.0           # P95 of (Overall MHz / Max MHz) per VM
+    cpu_util_p95_vm_count: int = 0      # VMs contributing to the P95 calculation
+    memory_util_p95: float = 0.0        # P95 of (Consumed MiB / Size MiB) per VM
+    memory_util_p95_vm_count: int = 0
+
+    # ── REGION EVIDENCE (from vHost and vMetaData tabs) ──
+    # These raw signals are consumed by engine/region_guesser.py to infer an
+    # Azure region.  All collections are de-duplicated and sorted.
+    datacenter_names: list[str] = field(default_factory=list)         # vHost.Datacenter (unique, sorted)
+    datacenter_host_counts: dict[str, int] = field(default_factory=dict)  # {dc_name: host_count}
+    timezone_names: list[str] = field(default_factory=list)           # vHost.Time Zone Name
+    gmt_offsets: list[str] = field(default_factory=list)              # vHost.GMT Offset (as strings)
+    domain_names: list[str] = field(default_factory=list)             # vHost.Domain
+    vcenter_fqdns: list[str] = field(default_factory=list)            # vMetaData.Server
 
     # Parse context
     vhost_available: bool = False           # True when vHost tab was present
@@ -277,10 +305,21 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         ci_hmem = _col_index(headers2, COL_HOST_MEMORY_MB, warnings)
         ci_vpc = _col_index(headers2, COL_VCPUS_PER_CORE, warnings)
 
+        # Region-evidence column indices (silent — no warning on miss)
+        ci_dc     = _col_index(headers2, "Datacenter",     [])
+        ci_tz     = _col_index(headers2, "Time Zone Name", [])
+        ci_gmt    = _col_index(headers2, "GMT Offset",     [])
+        ci_domain = _col_index(headers2, "Domain",         [])
+
         total_cores = 0
         total_hmem_mb = 0.0
         vcpu_per_core_values: list[float] = []
         num_hosts = 0
+        dc_names: set[str] = set()
+        dc_counts: dict[str, int] = {}
+        tz_names: set[str] = set()
+        gmt_vals: set[str] = set()
+        domain_vals: set[str] = set()
 
         for row2 in rows2:
             if ci_host is not None and row2[ci_host] is None:
@@ -299,6 +338,17 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             if isinstance(vpc, (int, float)) and vpc > 0:
                 vcpu_per_core_values.append(float(vpc))
 
+            if ci_dc is not None and row2[ci_dc]:
+                dc = str(row2[ci_dc]).strip()
+                dc_names.add(dc)
+                dc_counts[dc] = dc_counts.get(dc, 0) + 1
+            if ci_tz is not None and row2[ci_tz]:
+                tz_names.add(str(row2[ci_tz]).strip())
+            if ci_gmt is not None and row2[ci_gmt] is not None:
+                gmt_vals.add(str(row2[ci_gmt]).strip())
+            if ci_domain is not None and row2[ci_domain]:
+                domain_vals.add(str(row2[ci_domain]).strip().lower())
+
         inv.num_hosts = num_hosts
         inv.total_host_pcores = total_cores
         inv.total_host_memory_gb = round(total_hmem_mb * MB_TO_GB, 2)
@@ -306,6 +356,11 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             round(sum(vcpu_per_core_values) / len(vcpu_per_core_values), 4)
             if vcpu_per_core_values else 1.0
         )
+        inv.datacenter_names      = sorted(dc_names)
+        inv.datacenter_host_counts = dc_counts
+        inv.timezone_names         = sorted(tz_names)
+        inv.gmt_offsets            = sorted(gmt_vals)
+        inv.domain_names           = sorted(domain_vals)
 
     # ------------------------------------------------------------------
     # Resolve TCO baseline scope and populate primary inv fields
@@ -384,6 +439,136 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         if hasattr(inv, attr):
             delattr(inv, attr)
 
+    # ------------------------------------------------------------------
+    # vCPU tab — per-VM CPU utilisation (Overall MHz / Max MHz) → P95
+    # Powered-on VMs only; VMs with Max == 0 are skipped.
+    # ------------------------------------------------------------------
+    if "vCPU" in wb.sheetnames:
+        ws_cpu = wb["vCPU"]
+        rc = ws_cpu.iter_rows(values_only=True)
+        hc = list(next(rc))
+        ci_cp  = _col_index(hc, "Powerstate", [])
+        ci_max = _col_index(hc, "Max",        [])
+        ci_ovr = _col_index(hc, "Overall",    [])
+        cpu_utils: list[float] = []
+        for row in rc:
+            if ci_cp is None:
+                break
+            if str(row[ci_cp] or "").lower() != "poweredon":
+                continue
+            mx = row[ci_max] if ci_max is not None else None
+            ov = row[ci_ovr] if ci_ovr is not None else None
+            if isinstance(mx, (int, float)) and isinstance(ov, (int, float)) and mx > 0:
+                cpu_utils.append(float(ov) / float(mx))
+        if cpu_utils:
+            cpu_utils.sort()
+            p = min(int(len(cpu_utils) * 0.95), len(cpu_utils) - 1)
+            inv.cpu_util_p95 = round(cpu_utils[p], 4)
+            inv.cpu_util_p95_vm_count = len(cpu_utils)
+            print(
+                f"[rvtools_parser] CPU P95 utilisation: {inv.cpu_util_p95:.1%}"
+                f" ({inv.cpu_util_p95_vm_count:,} powered-on VMs)"
+            )
+    else:
+        warnings.append(
+            "vCPU tab not found — CPU utilisation telemetry unavailable. "
+            "CPU right-sizing will use the benchmark fallback reduction factor "
+            "(default: 40%). For better accuracy re-export RVtools with the vCPU tab enabled."
+        )
+
+    # ------------------------------------------------------------------
+    # vMemory tab — per-VM memory utilisation (Consumed MiB / Size MiB) → P95
+    # ------------------------------------------------------------------
+    if "vMemory" in wb.sheetnames:
+        ws_mem = wb["vMemory"]
+        rm = ws_mem.iter_rows(values_only=True)
+        hm = list(next(rm))
+        ci_mp  = _col_index(hm, "Powerstate", [])
+        ci_sz  = _col_index(hm, "Size MiB",   [])
+        ci_con = _col_index(hm, "Consumed",    [])
+        mem_utils: list[float] = []
+        for row in rm:
+            if ci_mp is None:
+                break
+            if str(row[ci_mp] or "").lower() != "poweredon":
+                continue
+            sz = row[ci_sz]  if ci_sz  is not None else None
+            co = row[ci_con] if ci_con is not None else None
+            if isinstance(sz, (int, float)) and isinstance(co, (int, float)) and sz > 0:
+                mem_utils.append(float(co) / float(sz))
+        if mem_utils:
+            mem_utils.sort()
+            p = min(int(len(mem_utils) * 0.95), len(mem_utils) - 1)
+            inv.memory_util_p95 = round(mem_utils[p], 4)
+            inv.memory_util_p95_vm_count = len(mem_utils)
+            print(
+                f"[rvtools_parser] Memory P95 utilisation: {inv.memory_util_p95:.1%}"
+                f" ({inv.memory_util_p95_vm_count:,} powered-on VMs)"
+            )
+    else:
+        warnings.append(
+            "vMemory tab not found — memory utilisation telemetry unavailable. "
+            "Memory right-sizing will use the benchmark fallback reduction factor "
+            "(default: 20%). For better accuracy re-export RVtools with the vMemory tab enabled."
+        )
+
+    # ------------------------------------------------------------------
+    # vDisk tab — provisioned disk capacity per VM
+    # Azure managed disk cost is based on provisioned tier size, not used
+    # bytes, so this is the correct basis for the Azure storage estimate.
+    # ------------------------------------------------------------------
+    if "vDisk" in wb.sheetnames:
+        ws_disk = wb["vDisk"]
+        rd = ws_disk.iter_rows(values_only=True)
+        hd = list(next(rd))
+        ci_dvm = _col_index(hd, "VM",           [])
+        ci_dp  = _col_index(hd, "Powerstate",   [])
+        ci_cap = _col_index(hd, "Capacity MiB", [])
+        ci_dt  = _col_index(hd, "Template",     [])
+        total_cap_mib_all = 0.0
+        total_cap_mib_on  = 0.0
+        vm_disks: dict[str, list[float]] = {}
+        for row in rd:
+            if ci_dt is not None and row[ci_dt] is True:
+                continue
+            cap = row[ci_cap] if ci_cap is not None else None
+            if not isinstance(cap, (int, float)):
+                continue
+            total_cap_mib_all += float(cap)
+            is_on = (
+                ci_dp is not None
+                and str(row[ci_dp] or "").lower() == "poweredon"
+            )
+            if is_on:
+                total_cap_mib_on += float(cap)
+                if ci_dvm is not None and row[ci_dvm]:
+                    vm_name = str(row[ci_dvm])
+                    if vm_name not in vm_disks:
+                        vm_disks[vm_name] = []
+                    vm_disks[vm_name].append(round(float(cap) * MIB_TO_GB, 4))
+        inv.total_disk_provisioned_gb           = round(total_cap_mib_all * MIB_TO_GB, 2)
+        inv.total_disk_provisioned_poweredon_gb = round(total_cap_mib_on  * MIB_TO_GB, 2)
+        inv.vm_disk_sizes_gb = vm_disks
+        print(
+            f"[rvtools_parser] vDisk provisioned: all={inv.total_disk_provisioned_gb:,.0f} GB  "
+            f"powered-on={inv.total_disk_provisioned_poweredon_gb:,.0f} GB  "
+            f"({len(vm_disks):,} VMs, {sum(len(v) for v in vm_disks.values()):,} disks)"
+        )
+
+    # ------------------------------------------------------------------
+    # vMetaData tab — vCenter FQDN(s) for region inference
+    # ------------------------------------------------------------------
+    if "vMetaData" in wb.sheetnames:
+        ws_md = wb["vMetaData"]
+        rmd = ws_md.iter_rows(values_only=True)
+        hmd = list(next(rmd))
+        ci_srv = _col_index(hmd, "Server", [])
+        fqdns: list[str] = []
+        for row in rmd:
+            if ci_srv is not None and row[ci_srv]:
+                fqdns.append(str(row[ci_srv]).strip().lower())
+        inv.vcenter_fqdns = fqdns
+
     if warnings:
         print(f"[rvtools_parser] {len(warnings)} warning(s):")
         for w in warnings:
@@ -421,6 +606,28 @@ def summarize(inv: RVToolsInventory) -> None:
     print(f"  vCPU (powered-on):            {inv.total_vcpu_poweredon:>10,}")
     print(f"  vMemory GB (powered-on):      {inv.total_vmemory_gb_poweredon:>10,.1f}")
     print(f"  Storage GB (powered-on):      {inv.total_storage_poweredon_gb:>10,.1f}")
+    print()
+    print("  ── Utilisation Telemetry ──")
+    if inv.cpu_util_p95 > 0:
+        print(f"  CPU P95 utilisation:          {inv.cpu_util_p95:>9.1%}  ({inv.cpu_util_p95_vm_count:,} VMs)")
+    else:
+        print("  CPU P95 utilisation:            n/a  (vCPU tab absent or all VMs powered-off)")
+    if inv.memory_util_p95 > 0:
+        print(f"  Memory P95 utilisation:       {inv.memory_util_p95:>9.1%}  ({inv.memory_util_p95_vm_count:,} VMs)")
+    else:
+        print("  Memory P95 utilisation:         n/a  (vMemory tab absent)")
+    print()
+    print("  ── Region Evidence ──")
+    if inv.datacenter_names:
+        print(f"  Datacenter(s):  {', '.join(inv.datacenter_names)}")
+    if inv.timezone_names:
+        print(f"  Time zone(s):   {', '.join(inv.timezone_names)}")
+    if inv.gmt_offsets:
+        print(f"  GMT offset(s):  {', '.join(inv.gmt_offsets)}")
+    if inv.domain_names:
+        print(f"  Domain(s):      {', '.join(inv.domain_names)}")
+    if inv.vcenter_fqdns:
+        print(f"  vCenter FQDN(s): {', '.join(inv.vcenter_fqdns)}")
     if inv.parse_warnings:
         print(f"\n  Warnings ({len(inv.parse_warnings)}):")
         for w in inv.parse_warnings:

@@ -183,14 +183,17 @@ def compute(inputs: BusinessCaseInputs, benchmarks: BenchmarkConfig) -> StatusQu
         for wl, cp in zip(inputs.workloads, inputs.consumption_plans)
         if cp.dr_activated == YesNo.YES
     )
-    # Backup/DR storage: only on-prem when NOT included in Azure consumption
+    # Backup/DR storage: always present in SQ when the option is activated.
+    # The backup_storage_in_consumption flag controls the Azure *retained* side
+    # (whether backup migrates to Azure Consumption or stays on-prem long-term),
+    # but the on-premises baseline always carries this cost.
     total_backup_gb = sum(
         (wl.backup_size_gb or 0) for wl, cp in zip(inputs.workloads, inputs.consumption_plans)
-        if cp.backup_storage_in_consumption == YesNo.NO and cp.backup_activated == YesNo.YES
+        if cp.backup_activated == YesNo.YES
     )
     total_dr_gb = sum(
         (wl.dr_size_gb or 0) for wl, cp in zip(inputs.workloads, inputs.consumption_plans)
-        if cp.dr_storage_in_consumption == YesNo.NO and cp.dr_activated == YesNo.YES
+        if cp.dr_activated == YesNo.YES
     )
 
     # Baseline acquisition costs (Y0)

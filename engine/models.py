@@ -14,6 +14,18 @@ from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
+# Migration ramp presets
+# ---------------------------------------------------------------------------
+
+MIGRATION_RAMP_PRESETS: dict[str, list[float]] = {
+    "Express (100% by Y1)":   [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "Standard (100% by Y2)":  [0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "Extended (100% by Y3)":  [0.4, 0.8, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+    "Custom":                 None,  # type: ignore[dict-item]
+}
+
+
+# ---------------------------------------------------------------------------
 # Enumerations
 # ---------------------------------------------------------------------------
 
@@ -97,6 +109,15 @@ class WorkloadInventory(BaseModel):
 
     # Storage
     allocated_storage_gb: float = Field(0.0, ge=0, description="vInfo tab, sum column AT / 953.67")
+
+    # Utilisation telemetry (from vCPU.Overall/Max and vMemory.Consumed/Size MiB)
+    # 0.0 means not available — consumption_builder will use fallback reduction factors.
+    cpu_util_p95: float = Field(0.0, ge=0.0, le=500.0, description="P95 CPU utilisation fraction across fleet (Overall/Max)")
+    memory_util_p95: float = Field(0.0, ge=0.0, le=500.0, description="P95 memory utilisation fraction across fleet (Consumed/Size MiB)")
+    util_vm_count: int = Field(0, ge=0, description="Number of powered-on VMs contributing to utilisation P95")
+
+    # Azure region inferred from vHost/vMetaData metadata
+    inferred_azure_region: str = Field("", description="Azure region string inferred from RVtools metadata (e.g. 'uksouth')")
 
     # Backup / DR (populated if options activated)
     backup_size_gb: Optional[float] = None
@@ -183,6 +204,13 @@ class ConsumptionPlan(BaseModel):
     annual_compute_consumption_lc_y10: float = Field(0.0, ge=0)
     annual_storage_consumption_lc_y10: float = Field(0.0, ge=0)
     annual_other_consumption_lc_y10: float = Field(0.0, ge=0)
+
+    # Azure Consumption Discount — optional, 0.0 = PAYG list price
+    # (e.g. 0.15 = 15% off PAYG via CSP/EA/MCA agreement)
+    azure_consumption_discount: float = Field(
+        0.0, ge=0.0, le=1.0,
+        description="ACD: fractional discount off PAYG (0.0–1.0; 0 = no discount)",
+    )
 
     # Microsoft funding (negative values = inflows)
     aco_by_year: list[float] = Field(default=[0.0] * 10, min_length=10, max_length=10)
@@ -322,8 +350,29 @@ class BenchmarkConfig(BaseModel):
     productivity_reduction_after_migration: float = 0.42
     productivity_recapture_rate: float = 0.95
 
+    # Azure PAYG baseline rates (for auto-estimating consumption from RVtools inventory)
+    # Defaults approximate Azure Dv3 general-purpose PAYG pricing
+    payg_cost_per_vcpu_hour: float = 0.048   # $/vCPU/hr  (e.g. D2s v3 = $0.096/hr ÷ 2 vCPU)
+    payg_cost_per_gb_month: float = 0.018    # $/GB/month (Standard SSD managed disk tier)
+
+    # NII interest rate — short-term deposit / treasury rate applied to
+    # the customer's positive cash differential position
+    nii_interest_rate: float = 0.03
+
     # Financial
     perpetual_growth_rate: float = 0.03
+
+    # Right-sizing parameters
+    # When RVtools utilisation telemetry is available (vCPU.Overall /
+    # vMemory.Consumed), the engine uses fleet P{utilization_percentile}
+    # × headroom factor.  When no telemetry is present, the
+    # fallback_reduction factors apply instead.
+    cpu_rightsizing_headroom_factor: float = 0.20     # 20% headroom above P95 in Azure
+    memory_rightsizing_headroom_factor: float = 0.20  # 20% headroom above P95
+    storage_rightsizing_headroom_factor: float = 1.20  # in-use × 1.20
+    cpu_rightsizing_fallback_reduction: float = 0.40   # 40% vCPU reduction without telemetry
+    memory_rightsizing_fallback_reduction: float = 0.20  # 20% memory reduction without telemetry
+    utilization_percentile: int = 95                   # P-value for utilisation analysis
 
     @classmethod
     def from_yaml(cls, path: str = "data/benchmarks_default.yaml") -> "BenchmarkConfig":

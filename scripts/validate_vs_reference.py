@@ -1,22 +1,22 @@
 """
-scripts/validate_vs_reliance.py
-================================
+scripts/validate_vs_reference.py
+=================================
 Two-track validation of the Python engine against the manually-completed
-Reliance_BV Benchmark Business Case v6.xlsm workbook, which was built
+reference BV Benchmark Business Case v6.xlsm workbook, which was built
 using the same RVTools_export_VCP003 file.
 
 TRACK A — RVtools Parser Accuracy
   Run engine.rvtools_parser.parse() on the VCP003 export and compare the
-  parsed aggregate values to the numbers manually entered in the Reliance
+  parsed aggregate values to the numbers manually entered in the reference
   workbook's '1-Client Variables' sheet.
 
 TRACK B — Engine Calculation Accuracy
   Construct BusinessCaseInputs that exactly mirror what was entered in the
-  Reliance workbook (not derived from RVtools), run the full Python engine
+  reference workbook (not derived from RVtools), run the full Python engine
   pipeline, and compare every material output to the cached Excel values.
 
 Usage:
-    python scripts/validate_vs_reliance.py [--strict]
+    python scripts/validate_vs_reference.py [--strict]
 
 Exit codes:
     0 — all checks within tolerance
@@ -61,7 +61,7 @@ RVTOOLS_FILE = ROOT / "RVTools_export_VCP003_2026-01-05_13.14.03.xlsx"
 BENCHMARKS_YAML = ROOT / "data" / "benchmarks_default.yaml"
 
 # ---------------------------------------------------------------------------
-# Ground-truth values: manually entered inputs (Reliance '1-Client Variables')
+# Ground-truth values: manually entered inputs (reference workbook '1-Client Variables')
 # ---------------------------------------------------------------------------
 EXCEL_INPUTS = {
     "num_vms":                  2_155,
@@ -81,7 +81,7 @@ EXCEL_INPUTS = {
 }
 
 # ---------------------------------------------------------------------------
-# Ground-truth values: key outputs read from Reliance workbook cache
+# Ground-truth values: key outputs read from reference workbook cache
 #   Sources (sheet → row label):
 #     Summary Financial Case  → KPI rows
 #     Detailed Financial Case → year-by-year P&L view
@@ -145,15 +145,13 @@ NOTE_TOLERANCE = 0.05   # 5 % — flag but annotate as known discrepancy
 # Known structural differences (our engine vs Excel formula choices)
 # ---------------------------------------------------------------------------
 KNOWN_GAPS = {
-    # ---- Engine: Azure consumption growth uplift ----
-    # The Excel Detailed Financial Case multiplies Azure consumption by
-    # (1 + hardware_growth_rate) = 1.02 per year, making it 2 % higher than
-    # the raw consumption plan values.  Our engine uses consumption plan values
-    # directly without the growth uplift.  This is a formula choice, not a bug,
-    # and is captured here so tests on Azure-derived metrics don't give false
-    # alarms during this phase.
-    "az_consumption_y1",
-    "az_consumption_y2",
+    # ---- Azure consumption + derived metrics ----
+    # Azure-derived summary KPIs differ because the reference workbook uses
+    # expected_future_growth_rate = 0.02, while our validate test config uses the
+    # BenchmarkConfig default of 0.10.  This causes the Y10 run-rate baseline to
+    # grow faster, shifting NPV, ROI, and payback.  The per-year consumption formula
+    # itself is now correct (az_consumption_y1/y2 pass at 0.00%).
+    # These are input-sensitivity differences, not formula bugs.
     "az_annual_run_rate_y10",
     "az_10yr_sum_cf",
     "net_savings_10yr",
@@ -171,7 +169,7 @@ KNOWN_GAPS = {
 # reflect methodology choices or genuine data limitations, not engine bugs.
 #
 # Scope-mismatch fields (vHost present → parser defaults to powered-on only,
-# but the Reliance workbook was manually filled using all-VMs counts):
+# but the reference workbook was manually filled using all-VMs counts):
 #   num_vms              — parser: 2,045 (powered-on); workbook: 2,155 (all).
 #   allocated_vcpu       — powered-on vCPU < all-VMs vCPU.
 #   allocated_vmemory_gb — powered-on memory < all-VMs memory.
@@ -249,7 +247,7 @@ def check(key: str, actual: float, expected: float, tol: float = PASS_TOLERANCE)
 # ---------------------------------------------------------------------------
 def run_track_a() -> bool:
     print("\n" + "=" * 80)
-    print("TRACK A — RVtools Parser vs Reliance Manual Inputs")
+    print("TRACK A — RVtools Parser vs Reference Workbook Manual Inputs")
     print("=" * 80 + "\n")
 
     if not RVTOOLS_FILE.exists():
@@ -282,7 +280,7 @@ def run_track_a() -> bool:
 # TRACK B: Python engine vs Excel outputs
 # ---------------------------------------------------------------------------
 def build_inputs() -> BusinessCaseInputs:
-    """Construct inputs that exactly mirror the Reliance workbook entries."""
+    """Construct inputs that exactly mirror the reference workbook entries."""
     workload = WorkloadInventory(
         workload_name="DC Move",
         num_vms=2_155,
@@ -326,7 +324,7 @@ def build_inputs() -> BusinessCaseInputs:
     )
 
     return BusinessCaseInputs(
-        engagement=EngagementInfo(client_name="Reliance"),
+        engagement=EngagementInfo(client_name="Reference Client"),
         pricing=PricingConfig(
             windows_server_price_level=PriceLevel.D,
             sql_server_price_level=PriceLevel.D,
@@ -357,7 +355,7 @@ def load_benchmarks() -> BenchmarkConfig:
 
 def run_track_b() -> bool:
     print("\n" + "=" * 80)
-    print("TRACK B — Python Engine vs Reliance Excel Outputs")
+    print("TRACK B — Python Engine vs Reference Excel Outputs")
     print("=" * 80 + "\n")
 
     inputs = build_inputs()
@@ -424,7 +422,7 @@ def run_track_b() -> bool:
     # -----------------------------------------------------------------------
     # Section 4: Azure consumption (raw, before any growth uplift)
     # -----------------------------------------------------------------------
-    print("\n  --- Azure Consumption (NOTE: ~2% gap expected — see KNOWN_GAPS) ---")
+    print("\n  --- Azure Consumption ---")
     az_consumption = fc.az_azure_consumption
     checks_az_consumption = [
         ("az_consumption_y1",  az_consumption[1], EXCEL_OUTPUTS["az_consumption_y1"]),
@@ -467,6 +465,25 @@ def run_track_b() -> bool:
                                             EXCEL_OUTPUTS["az_annual_run_rate_y10"]),
     ]
 
+    # -----------------------------------------------------------------------
+    # Section 7: Net Interest Income (formula sanity — not absolute value)
+    # NII depends on the full cashflow differential. Since sq_total() has a
+    # ~1.25% residual gap vs reference workbook, the accumulated cash position and NII
+    # will diverge from the workbook's hidden-sheet values.
+    # Formula correctness is verified in tests/test_engine.py::TestNII.
+    # -----------------------------------------------------------------------
+
+    # -----------------------------------------------------------------------
+    # Section 8: IT Productivity benefit (spot-check full-migration value)
+    # -----------------------------------------------------------------------
+    from engine.productivity import compute as compute_productivity
+    pb = compute_productivity(inputs, benchmarks)
+    # Reference workbook: IT Productivity sheet G14=-$196,587 (1 FTE saved); annual benefit=$196,587
+    print("\n  --- IT Productivity Benefit ---")
+    checks_productivity = [
+        ("productivity_annual_full",  pb.annual_benefit_full, 196_587.21),
+    ]
+
     # Run all check groups
     all_checks = (
         checks_sq_y0
@@ -475,6 +492,7 @@ def run_track_b() -> bool:
         + checks_az_consumption
         + checks_migration
         + checks_kpis
+        + checks_productivity
     )
     results = [check(key, actual, expected) for key, actual, expected in all_checks]
     n = len(results)
@@ -489,7 +507,7 @@ def run_track_b() -> bool:
 # Main
 # ---------------------------------------------------------------------------
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Validate Python engine vs Reliance Excel workbook.")
+    parser = argparse.ArgumentParser(description="Validate Python engine vs reference Excel workbook.")
     parser.add_argument(
         "--strict", action="store_true",
         help="Treat known-gap items as failures (use after engine bug-fixes)."
@@ -518,7 +536,7 @@ def main() -> int:
             "  NOTE 2 — 'parser limitation' (⚑): auto-detection gaps on VCP003:\n"
             "    • num_vms / allocated_vcpu / allocated_vmemory_gb / est_physical_servers\n"
             "      — parser defaults to powered-on only when vHost tab is present (2,045\n"
-            "      VMs); Reliance workbook was manually filled using all VMs (2,155).\n"
+            "      VMs); reference workbook was manually filled using all VMs (2,155).\n"
             "      Pass include_powered_off=True or override in the intake form.\n"
             "    • allocated_storage_gb — powered-on In Use MiB; ±1.17% from workbook.\n"
             "    • pcores_with_windows_server — powered-on scope + estimated ratio;\n"

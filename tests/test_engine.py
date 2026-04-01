@@ -153,17 +153,21 @@ class TestRetainedCosts:
             )
 
     def test_retained_zero_at_full_migration(self, contoso_inputs, default_benchmarks):
-        """By Y3, migration is 100% — retained license costs should be ~0."""
+        """Virt licenses drop to 0 one year after full migration.
+        Contoso ramp=[0.4, 0.8, 1.0, ...]: full migration at Y3, so lagged_ramp
+        reaches 1.0 at Y4 — virt licenses[4] should be 0."""
         sq = status_quo.compute(contoso_inputs, default_benchmarks)
         ret = retained_costs.compute(contoso_inputs, default_benchmarks, sq)
-        assert ret.virtualization_licenses[3] == pytest.approx(0.0, abs=1.0)
+        assert ret.virtualization_licenses[4] == pytest.approx(0.0, abs=1.0)
 
-    def test_retained_partial_at_y1(self, contoso_inputs, default_benchmarks):
-        """At Y1 (40% migrated), retained costs ≈ 60% of status quo."""
+    def test_retained_partial_at_y2(self, contoso_inputs, default_benchmarks):
+        """At Y2, lagged ramp = ramp[Y1] = 40%, so virt retained ≈ 60% of sq[Y1].
+        Contoso ramp=[0.4, 0.8, 1.0, ...]: lagged_ramp at Y2 = ramp_y1 = 0.4."""
         sq = status_quo.compute(contoso_inputs, default_benchmarks)
         ret = retained_costs.compute(contoso_inputs, default_benchmarks, sq)
+        # retained[2] = sq[1] * (1 - 0.4); compare against sq[1] baseline
         expected_fraction = 0.60
-        actual_fraction = ret.virtualization_licenses[1] / sq.virtualization_licenses[1]
+        actual_fraction = ret.virtualization_licenses[2] / sq.virtualization_licenses[1]
         assert approx_pct(expected_fraction, actual_fraction, tol=0.05)
 
 

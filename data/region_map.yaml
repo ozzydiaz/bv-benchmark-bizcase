@@ -1,0 +1,186 @@
+# Azure region inference map
+# Used by engine/region_guesser.py to infer an Azure hero region from
+# RVtools vHost/vMetaData metadata.
+#
+# Priority order applied by region_guesser:
+#   1. Country-code TLD in domain / vCenter FQDN  (.uk → uksouth)
+#   2. GMT offset (integer or half-hour string)
+#   3. Keyword match in datacenter name (case-insensitive substring)
+#   4. Fallback: eastus
+
+# ── TLD → Azure region ──────────────────────────────────────────────────────
+# Map country-code TLDs (and common second-level domains) to the nearest
+# Azure paired-region primary.
+tld_to_region:
+  ".uk":     "uksouth"
+  ".co.uk":  "uksouth"
+  ".ie":     "northeurope"
+  ".de":     "germanywestcentral"
+  ".at":     "germanywestcentral"
+  ".ch":     "switzerlandnorth"
+  ".fr":     "francecentral"
+  ".be":     "westeurope"
+  ".nl":     "westeurope"
+  ".lu":     "westeurope"
+  ".se":     "swedencentral"
+  ".no":     "norwayeast"
+  ".dk":     "swedencentral"
+  ".fi":     "swedencentral"
+  ".pl":     "polandcentral"
+  ".it":     "italynorth"
+  ".es":     "spaincentral"
+  ".pt":     "westeurope"
+  ".in":     "centralindia"
+  ".jp":     "japaneast"
+  ".au":     "australiaeast"
+  ".nz":     "australiaeast"
+  ".sg":     "southeastasia"
+  ".hk":     "eastasia"
+  ".kr":     "koreacentral"
+  ".ae":     "uaenorth"
+  ".sa":     "qatarcentral"
+  ".za":     "southafricanorth"
+  ".ca":     "canadacentral"
+  ".br":     "brazilsouth"
+  ".mx":     "mexicocentral"
+
+# ── GMT offset (as string) → Azure region ───────────────────────────────────
+# When the customer domain doesn't carry a country TLD, use the GMT offset
+# reported on vHost hosts.  Values are strings to handle both integer and
+# half-hour offsets (e.g. "330" for India IST = UTC+5:30).
+# Where multiple Azure regions share a timezone we pick the largest/most
+# capable paired-region primary.
+gmt_offset_to_region:
+  "-720": "westus3"       # UTC-12 (Line Islands)
+  "-660": "westus3"       # UTC-11 (Samoa)
+  "-600": "westus3"       # UTC-10 (Hawaii)
+  "-570": "westus3"       # UTC-9:30 (Marquesas)
+  "-540": "westus3"       # UTC-9  (Alaska)
+  "-480": "westus"        # UTC-8  (Pacific)
+  "-420": "westus"        # UTC-7  (Mountain, PDT)
+  "-360": "centralus"     # UTC-6  (Central)
+  "-300": "eastus"        # UTC-5  (Eastern)
+  "-240": "eastus"        # UTC-4  (Eastern DST / Atlantic)
+  "-210": "eastus"        # UTC-3:30 (Newfoundland)
+  "-180": "brazilsouth"   # UTC-3  (BRT / Brazil / Argentina)
+  "-120": "brazilsouth"   # UTC-2  (Atlantic / S.Georgia)
+  "-60":  "brazilsouth"   # UTC-1  (Azores / Cape Verde)
+  "0":    "uksouth"       # UTC    (UK / Ireland / Portugal / W.Africa)
+  "60":   "westeurope"    # UTC+1  (CET — most of Europe)
+  "120":  "westeurope"    # UTC+2  (EET — Central/Eastern Europe)
+  "180":  "uaenorth"      # UTC+3  (EAT / MSK / Gulf states)
+  "210":  "uaenorth"      # UTC+3:30 (Iran)
+  "240":  "uaenorth"      # UTC+4  (UAE / Oman / Azerbaijan)
+  "270":  "centralindia"  # UTC+4:30 (Afghanistan)
+  "300":  "centralindia"  # UTC+5  (Pakistan / Uzbekistan)
+  "330":  "centralindia"  # UTC+5:30 (IST — India)
+  "345":  "centralindia"  # UTC+5:45 (Nepal)
+  "360":  "centralindia"  # UTC+6  (Bangladesh / Kazakhstan)
+  "390":  "southeastasia" # UTC+6:30 (Myanmar)
+  "420":  "southeastasia" # UTC+7  (ICT — Thailand / Vietnam)
+  "480":  "eastasia"      # UTC+8  (China Standard Time / Singapore / HK)
+  "525":  "eastasia"      # UTC+8:45 (Aus Central Western)
+  "540":  "japaneast"     # UTC+9  (JST — Japan / Korea)
+  "570":  "australiasoutheast" # UTC+9:30 (ACST — Darwin)
+  "600":  "australiaeast" # UTC+10 (AEST — Sydney/Melbourne/Brisbane)
+  "630":  "australiaeast" # UTC+10:30 (Lord Howe Is.)
+  "660":  "australiaeast" # UTC+11 (AEDT)
+  "720":  "australiaeast" # UTC+12 (NZST)
+  "765":  "australiaeast" # UTC+12:45 (Chatham)
+  "780":  "australiaeast" # UTC+13 (NZDT)
+
+# ── Datacenter name keywords → Azure region ──────────────────────────────────
+# Case-insensitive substring match against each datacenter name string.
+# The FIRST match in list order wins (most-specific entries first).
+# null means "no geographic signal — skip".
+datacenter_keyword_to_region:
+  # ── Named cities / countries ──
+  london:          uksouth
+  manchester:      uksouth
+  birmingham:      uksouth
+  scotland:        uksouth
+  ireland:         northeurope
+  dublin:          northeurope
+  amsterdam:       westeurope
+  rotterdam:       westeurope
+  netherlands:     westeurope
+  german:          germanywestcentral
+  frankfurt:       germanywestcentral
+  munich:          germanywestcentral
+  berlin:          germanywestcentral
+  paris:           francecentral
+  france:          francecentral
+  switzerland:     switzerlandnorth
+  zurich:          switzerlandnorth
+  geneva:          switzerlandnorth
+  sweden:          swedencentral
+  stockholm:       swedencentral
+  norway:          norwayeast
+  oslo:            norwayeast
+  finland:         swedencentral
+  helsinki:        swedencentral
+  poland:          polandcentral
+  warsaw:          polandcentral
+  italy:           italynorth
+  milan:           italynorth
+  spain:           spaincentral
+  madrid:          spaincentral
+  portugal:        westeurope
+  lisbon:          westeurope
+  india:           centralindia
+  mumbai:          centralindia
+  pune:            centralindia
+  hyderabad:       centralindia
+  chennai:         southindia
+  bangalore:       centralindia
+  japan:           japaneast
+  tokyo:           japaneast
+  osaka:           japanwest
+  korea:           koreacentral
+  seoul:           koreacentral
+  singapore:       southeastasia
+  "hong kong":     eastasia
+  hongkong:        eastasia
+  china:           chinanorth3
+  beijing:         chinanorth3
+  shanghai:        chinaeast3
+  australia:       australiaeast
+  sydney:          australiaeast
+  melbourne:       australiasoutheast
+  perth:           australiaeast
+  canada:          canadacentral
+  toronto:         canadacentral
+  montreal:        canadaeast
+  brazil:          brazilsouth
+  "sao paulo":     brazilsouth
+  mexico:          mexicocentral
+  uae:             uaenorth
+  dubai:           uaenorth
+  abu dhabi:       uaenorth
+  qatar:           qatarcentral
+  doha:            qatarcentral
+  "south africa":  southafricanorth
+  johannesburg:    southafricanorth
+  cape town:       southafricanorth
+  # ── US ──
+  ashburn:         eastus
+  virginia:        eastus
+  dallas:          southcentralus
+  texas:           southcentralus
+  chicago:         northcentralus
+  illinois:        northcentralus
+  iowa:            centralus
+  california:      westus3
+  phoenix:         westus3
+  arizona:         westus3
+  seattle:         westus2
+  washington:      westus2
+  # ── Generic compass directions (last resort — only match if nothing else hit) ──
+  east:            eastus
+  west:            westus3
+  north:           northcentralus
+  south:           southcentralus
+  central:         centralus
+
+# ── Fallback ─────────────────────────────────────────────────────────────────
+fallback_region: "eastus"

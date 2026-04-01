@@ -151,3 +151,38 @@ productivity_reduction_after_migration:
 productivity_recapture_rate:
   default: 0.95
   survey_backup: 0.95
+payg_cost_per_vcpu_hour:
+  default: 0.048
+  survey_backup: 0.048
+payg_cost_per_gb_month:
+  default: 0.018
+  survey_backup: 0.018
+nii_interest_rate:
+  default: 0.03
+  survey_backup: 0.03
+perpetual_growth_rate:
+  default: 0.03
+  survey_backup: 0.03
+
+# Right-sizing parameters
+# When RVtools utilisation telemetry is available (vCPU.Overall / vMemory.Consumed),
+# the engine uses the fleet P-value (default P95) x headroom factor to right-size.
+# When no telemetry is present, the fallback_reduction factors apply instead.
+cpu_rightsizing_headroom_factor:
+  default: 0.20
+  survey_backup: 0.20
+memory_rightsizing_headroom_factor:
+  default: 0.20
+  survey_backup: 0.20
+storage_rightsizing_headroom_factor:
+  default: 1.20
+  survey_backup: 1.20
+cpu_rightsizing_fallback_reduction:
+  default: 0.40
+  survey_backup: 0.40
+memory_rightsizing_fallback_reduction:
+  default: 0.20
+  survey_backup: 0.20
+utilization_percentile:
+  default: 95
+  survey_backup: 95

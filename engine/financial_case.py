@@ -142,13 +142,27 @@ class FinancialCase:
         return [sq[i] - az[i] for i in range(YEARS + 1)]
 
 
-def _azure_consumption_by_year(inputs: BusinessCaseInputs) -> list[float]:
+def _azure_consumption_by_year(
+    inputs: BusinessCaseInputs,
+    benchmarks: BenchmarkConfig,
+) -> list[float]:
     """
     Sum Azure consumption across all workloads for each year.
-    Each workload's consumption ramps linearly from 0 to the Y10 anchor,
-    weighted by the migration ramp-up schedule (average of current and
-    prior year ramp — matching the Excel formula pattern).
+
+    Formula (matching Excel 'Detailed Financial Case' sheet):
+        consumption_y = avg_ramp_y × full_run_rate × (1 + g) × (1 − ACD)
+
+    Where:
+      avg_ramp_y  = (ramp_y + ramp_{y-1}) / 2  (half-year convention)
+      full_run_rate = compute + storage + other  (Y10 anchor, pre-growth)
+      g           = hardware.expected_future_growth_rate  (flat 1-period uplift)
+      ACD         = consumption_plan.azure_consumption_discount
+
+    Note: the Excel applies (1 + g) as a flat single-period cost-growth
+    adjustment to all years, not as a compound annual rate.  This reflects
+    the assumption that Azure pricing will grow by g relative to today.
     """
+    g = inputs.hardware.expected_future_growth_rate
     result = [0.0] * (YEARS + 1)
     for cp in inputs.consumption_plans:
         full_run = (
@@ -156,11 +170,13 @@ def _azure_consumption_by_year(inputs: BusinessCaseInputs) -> list[float]:
             + cp.annual_storage_consumption_lc_y10
             + cp.annual_other_consumption_lc_y10
         )
+        acd = cp.azure_consumption_discount
+        effective_run = full_run * (1.0 + g) * (1.0 - acd)
         for yr in range(1, YEARS + 1):
             ramp_this = cp.migration_ramp_pct[yr - 1]
             ramp_prev = cp.migration_ramp_pct[yr - 2] if yr > 1 else 0.0
             avg_ramp = (ramp_this + ramp_prev) / 2
-            result[yr] += avg_ramp * full_run
+            result[yr] += avg_ramp * effective_run
     return result
 
 
@@ -192,7 +208,7 @@ def compute(
     """Assemble the full Detailed Financial Case matrix."""
     fc = FinancialCase()
 
-    az_consumption = _azure_consumption_by_year(inputs)
+    az_consumption = _azure_consumption_by_year(inputs, benchmarks)
     az_migration = _migration_costs_by_year(inputs)
 
     # Existing Azure run rate

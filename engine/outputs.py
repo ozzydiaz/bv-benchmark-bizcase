@@ -14,6 +14,8 @@ from math import isfinite
 
 from .models import BenchmarkConfig, BusinessCaseInputs
 from .financial_case import FinancialCase
+from .productivity import ProductivityBenefit, compute as compute_productivity
+from .net_interest_income import NetInterestIncome, compute as compute_nii
 from .status_quo import YEARS
 
 
@@ -57,6 +59,12 @@ class BusinessCaseSummary:
     # Year 10 annualised
     savings_yr10: float = 0.0
     savings_pct_yr10: float = 0.0
+
+    # IT Productivity benefit
+    productivity: ProductivityBenefit | None = None
+
+    # Net Interest Income
+    nii: NetInterestIncome | None = None
 
 
 def _npv(cash_flows: list[float], wacc: float, years: int = YEARS) -> float:
@@ -117,23 +125,21 @@ def compute(
     summary.npv_5yr = _npv(savings, wacc, 5)
 
     tv = _terminal_value(savings[YEARS], wacc, g)
-    summary.terminal_value = tv
     tv_discounted = tv / (1 + wacc) ** YEARS
     tv_5yr_discounted = _terminal_value(savings[5], wacc, g) / (1 + wacc) ** 5
 
+    # terminal_value stored as the PV (discounted to today) — matches workbook C8
+    summary.terminal_value = tv_discounted
     summary.npv_10yr_with_terminal_value = summary.npv_10yr + tv_discounted
     summary.npv_5yr_with_terminal_value = summary.npv_5yr + tv_5yr_discounted
 
-    # ROI
-    total_investment_10yr = sum(fc.az_azure_consumption[1:] + fc.az_migration_costs[1:])
-    total_investment_5yr = sum(
-        fc.az_azure_consumption[1:6]
-    ) + sum(fc.az_migration_costs[1:6])
-    total_savings_10yr = sum(savings[1:])
-    total_savings_5yr = sum(savings[1:6])
-
-    summary.roi_10yr = (total_savings_10yr / total_investment_10yr) if total_investment_10yr else 0.0
-    summary.roi_5yr = (total_savings_5yr / total_investment_5yr) if total_investment_5yr else 0.0
+    # ROI: (project NPV incl. terminal value) / NPV of Azure costs — matches workbook E6
+    # This is the NPV return multiple: how much value the Azure case generates
+    # per dollar of present-valued Azure investment.
+    npv_az_10yr = _npv(fc.az_total(), wacc, YEARS)
+    npv_az_5yr  = _npv(fc.az_total(), wacc, 5)
+    summary.roi_10yr = (summary.npv_10yr_with_terminal_value / npv_az_10yr) if npv_az_10yr else 0.0
+    summary.roi_5yr  = (summary.npv_5yr_with_terminal_value  / npv_az_5yr)  if npv_az_5yr  else 0.0
 
     # Payback
     cumulative = [0.0]
@@ -187,6 +193,12 @@ def compute(
         "Azure Case": -(az_hw + az_dc + az_lic + az_it + az_cloud),
     }
 
+    # IT Productivity benefit
+    summary.productivity = compute_productivity(inputs, benchmarks)
+
+    # Net Interest Income
+    summary.nii = compute_nii(fc, benchmarks)
+
     return summary
 
 
@@ -216,3 +228,11 @@ def print_summary(summary: BusinessCaseSummary) -> None:
         if yr == 0:
             continue
         print(f"    Y{yr:>2d}: {fmt(s)}")
+    if summary.productivity:
+        pb = summary.productivity
+        print(f"\n  IT Productivity Benefit:")
+        print(f"    FTEs saved at full migration: {pb.headcount_saved}")
+        print(f"    Annual benefit (full):        {fmt(pb.annual_benefit_full)}")
+    if summary.nii:
+        n = summary.nii
+        print(f"\n  Net Interest Income (discounted):  {fmt(n.total_discounted_nii)}")
