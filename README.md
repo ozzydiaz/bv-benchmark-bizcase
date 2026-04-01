@@ -416,23 +416,94 @@ bv-benchmark-bizcase/
 
 ## Fact Checker
 
-The fact checker compares the Python engine's computed outputs against any saved client workbook, giving practitioners and customers an objective parity score before presenting the business case.
+The fact checker is a **bidirectional parity validator**: it answers two independent questions at once.
 
-### How it works
+1. **Input parity** — Are the engine and the Excel workbook modelling the same scenario? (Do the numbers in the engine's inputs match the yellow cells in the workbook?)
+2. **Output parity** — Does the Python engine replicate the Excel workbook's financial logic? (Do the computed KPIs agree to within tolerance?)
 
-1. Reads the yellow input cells from the workbook's `1-Client Variables` and `2a-Consumption Plan Wk1` sheets
-2. Reconstructs `BusinessCaseInputs` from those values
-3. Runs the full Python engine pipeline
-4. Compares every material output (NPV, ROI, payback, cost waterfall) against the Excel-cached values
-5. Returns a `FactCheckReport` with per-metric delta %, pass/warn/fail status, and a weighted **Confidence Score (0–100%)**
+This gives a pre-presentation quality gate: a seller can upload the saved workbook and get an instant confidence score before taking the business case to a customer.
 
-> **Prerequisite:** The workbook must be **saved in Excel** after filling in all inputs — openpyxl reads formula values from the saved cache, not live formula execution.
+### Theory of operation
+
+```
+Saved .xlsm workbook
+        │
+        ├─── Phase 1: Input comparison
+        │        Read yellow cells (D39, D44, D49 … E17:N17 etc.)
+        │        Compare to BusinessCaseInputs supplied by caller
+        │        Flag mismatches → input_mismatches[]
+        │
+        ├─── Phase 2: Engine run
+        │        Run full Python pipeline with the CALLER'S inputs
+        │        (not rebuilt from the workbook — the caller controls what is modelled)
+        │        status_quo → depreciation → retained_costs → financial_case → outputs
+        │
+        ├─── Phase 3: Output extraction
+        │        Read cached output cells from 'Summary Financial Case'
+        │        (C9=Project NPV, E6=ROI, E11=Payback, C8=Terminal Value …)
+        │        These are Excel's own answers, computed by its formulas
+        │
+        ├─── Phase 4: Check generation
+        │        For each KPI: delta% = (engine − excel) / |excel| × 100
+        │        Severity = PASS | WARN | FAIL per SEVERITY_CONFIG thresholds
+        │
+        └─── Phase 5: Confidence score
+                 score = Σ(wᵢ × passᵢ) / Σwᵢ × 100%   (WARN = 0.5 credit)
+```
+
+> **Critical prerequisite:** The workbook **must be saved in Excel** after all inputs are filled in. openpyxl reads the formula-result cache that Excel writes on save — it cannot execute formulas itself. A workbook that has never been opened in Excel (e.g. freshly exported) will have empty/zero output cells and produce meaningless results.
+
+### What is compared
+
+#### Phase 1 — Input cells read from the workbook
+
+| Workbook cell | Field checked |
+|---|---|
+| `1-Client Variables` D39 | `num_vms` |
+| D44 | `allocated_vcpu` |
+| D49 | `allocated_vmemory_gb` |
+| D54 | `allocated_storage_gb` |
+| D66 | `vcpu_per_core_ratio` |
+| D67 | `pcores_with_windows_server` |
+| D68 | `pcores_with_windows_esu` |
+| `2a-Consumption Plan` E17:N17 | `migration_ramp_pct[0..9]` |
+
+Mismatches here mean the engine and the workbook are not modelling the same customer scenario. Results are still computed, but the comparison is flagged as unreliable.
+
+#### Phase 3 — Output cells read from 'Summary Financial Case'
+
+| Cell | KPI | Engine field |
+|---|---|---|
+| C9 | Project NPV (10-yr, incl. terminal value) | `npv_10yr_with_terminal_value` |
+| C10 | Project NPV (10-yr, excl. terminal value) | `npv_10yr` |
+| C8 | Terminal Value (PV) | `terminal_value` |
+| E6 | 10-Year ROI | `roi_10yr` |
+| E11 | Payback period (years) | `payback_years` |
+| C6 | NPV of SQ costs (10-yr) | `_npv(sq_total, wacc, 10)` |
+| C7 | NPV of Azure costs (10-yr) | `_npv(az_total, wacc, 10)` |
+| D6 | NPV of SQ costs (5-yr) | `_npv(sq_total, wacc, 5)` |
+
+### Severity thresholds
+
+Thresholds are tighter for the headline KPIs that customers and finance teams focus on.
+
+| Metric | PASS if Δ% ≤ | WARN if Δ% ≤ | Weight |
+|---|---|---|---|
+| Project NPV (10-yr) | 2% | 5% | 25% |
+| Payback period | 5% | 10% | 20% |
+| ROI (10-yr) | 2% | 5% | 15% |
+| NPV total benefits | 2% | 5% | 10% |
+| NPV total costs | 2% | 5% | 10% |
+| NPV infra savings | 3% | 7% | 8% |
+| Terminal value | 3% | 7% | 5% |
+| NPV admin savings | 5% | 10% | 4% |
+| Investment NPV | 5% | 10% | 3% |
 
 ### Confidence Score
 
-$$\text{score} = \frac{\sum_i w_i \cdot \text{pass}_i}{\sum_i w_i} \times 100\%$$
+$$\text{score} = \frac{\sum_i w_i \cdot \text{credit}_i}{\sum_i w_i} \times 100\%$$
 
-High-stakes metrics (Project NPV, Payback, ROI) carry the most weight. A WARN counts as half credit.
+where $\text{credit}_i = 1$ (PASS), $0.5$ (WARN), or $0$ (FAIL/SKIP).
 
 | Score | Interpretation |
 |---|---|
@@ -440,15 +511,14 @@ High-stakes metrics (Project NPV, Payback, ROI) carry the most weight. A WARN co
 | 70–90% | Review WARN items before presenting |
 | < 70% | One or more critical KPIs diverge — investigate before use |
 
-### Tolerances
+### What causes a mismatch
 
-| Severity | Threshold | Action |
-|---|---|---|
-| PASS | ≤ 2% delta on critical metrics | No action needed |
-| WARN | 2–5% delta | Review input assumptions |
-| FAIL | > 5% delta | Investigate formula or input mismatch |
+Common root causes, in order of likelihood:
 
-(Thresholds vary by metric; see `SEVERITY_CONFIG` in `engine/fact_checker.py`.)
+1. **Input mismatch** — The workbook's yellow cells differ from the engine's inputs (visible in the Input Mismatches section). The engine is modelling a different scenario than the workbook.
+2. **Workbook not saved** — Output cells are zero or stale. Re-open in Excel, recalculate (Ctrl+Alt+F9), save, then re-upload.
+3. **Benchmark divergence** — The workbook uses different benchmark assumptions (e.g. different WACC, growth rate, or hardware unit costs) than `benchmarks_default.yaml`. Override via a custom YAML or the Benchmark Assumptions expander in Step 1.
+4. **Formula gap** — The Python engine does not yet replicate a specific workbook formula (e.g. AVS scenario, custom productivity model). Check the Known Limitations table.
 
 ### CLI usage
 
@@ -463,12 +533,12 @@ python scripts/fact_check.py --workbook path/to/client.xlsm --strict
 python scripts/fact_check.py --workbook path/to/client.xlsm --json
 ```
 
-### Streamlit usage
+### App usage (Step 4 → Fact Check tab)
 
-In the **Step 4 Results** page, scroll to the **Fact Check** section and upload any saved `.xlsm` or `.xlsx` workbook.  The app displays:
-- Confidence score gauge (green ≥ 90%, amber ≥ 70%, red < 70%)
-- Per-metric comparison table with colour-coded rows
-- Input mismatch warnings if the workbook's input cells differ from the engine's inputs
+Upload any saved `.xlsm` or `.xlsx`. The tab displays:
+- Confidence score (colour-coded: green ≥ 90%, amber ≥ 70%, red < 70%)
+- Input mismatch warnings (if any)
+- Per-metric comparison table with Δ% and colour-coded PASS/WARN/FAIL rows
 
 ### Programmatic usage
 
