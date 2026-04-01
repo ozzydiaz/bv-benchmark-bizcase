@@ -111,6 +111,10 @@ class RVToolsInventory:
     total_vmemory_gb_poweredon: float = 0.0
     total_storage_poweredon_gb: float = 0.0  # powered-on In Use MiB / 953.67
 
+    # Parse context
+    vhost_available: bool = False           # True when vHost tab was present
+    include_powered_off_applied: bool = False  # True = all-VMs TCO baseline used
+
     # Metadata
     source_file: str = ""
     parse_warnings: list[str] = field(default_factory=list)
@@ -129,25 +133,49 @@ def _col_index(headers: list, name: str, warn_list: list[str]) -> int | None:
         return None
 
 
-def parse(path: str | Path) -> RVToolsInventory:
+def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsInventory:
     """
     Parse an RVTools export and return an aggregated RVToolsInventory.
 
-    Counting rules:
-      - TCO baseline metrics (num_vms, vCPU, memory, storage, Windows/ESU
-        pCores): ALL non-template VMs regardless of power state.  The customer
-        paid for all hardware and software, so every VM is counted.
-      - Azure migration sizing (num_vms_poweredon, vcpu_poweredon, etc.):
-        powered-on VMs only.  Only running VMs will be migrated.
+    TCO baseline scope (num_vms, vCPU, memory, storage, Windows/ESU pCores)
+    is auto-detected from vHost tab availability when include_powered_off=None:
+
+      vHost tab present  → powered-on VMs only (default).  The vHost tab
+        confirms the physical host inventory; powered-off VMs represent idle
+        capacity not consuming active hardware resources.
+        Override: pass include_powered_off=True to also count powered-off VMs.
+
+      vHost tab absent   → all VMs, powered-on + powered-off (default).
+        Without host data the inventory may be incomplete, so every VM is
+        included to avoid understating the baseline.
+        Override: pass include_powered_off=False to limit to powered-on only.
+
+    Azure migration sizing fields (num_vms_poweredon, total_vcpu_poweredon,
+    total_vmemory_gb_poweredon, total_storage_poweredon_gb) are ALWAYS
+    powered-on only regardless of this setting.
 
     Args:
         path: Path to the RVTools .xlsx file.
+        include_powered_off: Override for TCO baseline scope.
+            None (default) = auto-detect from vHost availability.
+            True  = include powered-off VMs (even if vHost is present).
+            False = exclude powered-off VMs (even if vHost is absent).
     """
     path = Path(path)
     inv = RVToolsInventory(source_file=str(path))
     warnings = inv.parse_warnings
 
     wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
+
+    # Counters populated in vInfo block; scope resolved into inv fields after
+    # vHost tab availability is determined.
+    num_vms_all = 0;       total_vcpu_all = 0;    total_mem_mb_all = 0.0
+    total_stor_mib_all = 0.0
+    win_vcpus_all = 0;     win_esu_vcpus_all = 0; win_unversioned_all = 0
+    num_vms_on = 0;        total_vcpu_on = 0;     total_mem_mb_on = 0.0
+    total_stor_mib_on = 0.0
+    win_vcpus_on = 0;      win_esu_vcpus_on = 0;  win_unversioned_on = 0
+    vhost_found = False
 
     # ------------------------------------------------------------------
     # vInfo tab
@@ -168,21 +196,6 @@ def parse(path: str | Path) -> RVToolsInventory:
         ci_os_cfg   = _col_index(headers, COL_OS_CONFIG,  warnings)
         ci_os_tools = _col_index(headers, COL_OS_TOOLS,   warnings)
 
-        # TCO counters — ALL non-template VMs
-        total_vcpu_all = 0
-        total_mem_mb_all = 0
-        total_stor_mib_all = 0.0
-        num_vms_all = 0
-        win_vcpus_all = 0
-        win_esu_vcpus_all = 0
-        win_unversioned_all = 0  # Windows VMs with no detectable version string
-
-        # Azure sizing counters — powered-on VMs only
-        num_vms_on = 0
-        total_vcpu_on = 0
-        total_mem_mb_on = 0
-        total_stor_mib_on = 0.0
-
         for row in rows:
             if ci_name is not None and row[ci_name] is None:
                 continue
@@ -196,21 +209,10 @@ def parse(path: str | Path) -> RVToolsInventory:
                 and str(row[ci_power] or "").lower() == "poweredon"
             )
 
-            # ── TCO BASELINE: all VMs ──
-            num_vms_all += 1
-
             cpus = row[ci_cpu] if ci_cpu is not None else None
             vm_cpus = int(cpus) if isinstance(cpus, (int, float)) else 0
-            if isinstance(cpus, (int, float)):
-                total_vcpu_all += vm_cpus
-
-            mem = row[ci_mem] if ci_mem is not None else None
-            if isinstance(mem, (int, float)):
-                total_mem_mb_all += mem
-
+            mem  = row[ci_mem]  if ci_mem  is not None else None
             stor = row[ci_stor] if ci_stor is not None else None
-            if isinstance(stor, (int, float)):
-                total_stor_mib_all += stor
 
             # OS classification: config-file column is primary (more complete
             # version strings); VMware Tools column is the fallback.
@@ -226,50 +228,38 @@ def parse(path: str | Path) -> RVToolsInventory:
                 or bool(_WINDOWS_ESU_PATTERN.search(os_tools))
             )
 
+            # ── All-VM accumulators ──
+            num_vms_all += 1
+            if isinstance(cpus, (int, float)):
+                total_vcpu_all += vm_cpus
+            if isinstance(mem, (int, float)):
+                total_mem_mb_all += mem
+            if isinstance(stor, (int, float)):
+                total_stor_mib_all += stor
             if is_win:
                 win_vcpus_all += vm_cpus
                 if is_esu:
                     win_esu_vcpus_all += vm_cpus
                 else:
-                    # Windows Server VM but no year/version in either OS column.
-                    # Likely a pre-2016 VM where VMware lost OS version data.
                     win_unversioned_all += 1
 
-            # ── AZURE SIZING: powered-on VMs only ──
+            # ── Powered-on accumulators ──
             if is_on:
                 num_vms_on += 1
-                total_vcpu_on += vm_cpus
+                if isinstance(cpus, (int, float)):
+                    total_vcpu_on += vm_cpus
                 if isinstance(mem, (int, float)):
                     total_mem_mb_on += mem
                 if isinstance(stor, (int, float)):
                     total_stor_mib_on += stor
+                if is_win:
+                    win_vcpus_on += vm_cpus
+                    if is_esu:
+                        win_esu_vcpus_on += vm_cpus
+                    else:
+                        win_unversioned_on += 1
 
-        inv.num_vms = num_vms_all
-        inv.total_vcpu = total_vcpu_all
-        inv.total_vmemory_gb = round(total_mem_mb_all * MB_TO_GB, 2)
-        inv.total_storage_in_use_gb = round(total_stor_mib_all * MIB_TO_GB, 2)
-        inv.windows_vms_unknown_version = win_unversioned_all
-        inv.esu_count_may_be_understated = win_unversioned_all > 0
-
-        inv.num_vms_poweredon = num_vms_on
-        inv.total_vcpu_poweredon = total_vcpu_on
-        inv.total_vmemory_gb_poweredon = round(total_mem_mb_on * MB_TO_GB, 2)
-        inv.total_storage_poweredon_gb = round(total_stor_mib_on * MIB_TO_GB, 2)
-
-        # Store raw vCPU counts; pCores derived after vHost ratio is known
-        inv._win_vcpus = win_vcpus_all        # type: ignore[attr-defined]
-        inv._win_esu_vcpus = win_esu_vcpus_all  # type: ignore[attr-defined]
-
-        if win_unversioned_all > 0:
-            warnings.append(
-                f"ESU undercount likely: {win_unversioned_all} Windows Server VMs "
-                f"(all power states) have no version string in either OS column "
-                f"(config file or VMware Tools).  These are likely pre-2016 VMs "
-                f"(2003/2008/2008 R2) that are ESU-eligible but undetectable from "
-                f"RVtools OS strings alone.  Review and override 'pCores with ESU' "
-                f"in the intake form using a separate OS audit (e.g. MAP Toolkit, "
-                f"Azure Migrate, or manual review)."
-            )
+        # Counters ready; scope resolved + inv fields assigned after vHost below.
 
     # ------------------------------------------------------------------
     # vHost tab
@@ -277,6 +267,7 @@ def parse(path: str | Path) -> RVToolsInventory:
     if "vHost" not in wb.sheetnames:
         warnings.append("vHost tab not found — no host data extracted")
     else:
+        vhost_found = True
         ws2 = wb["vHost"]
         rows2 = ws2.iter_rows(values_only=True)
         headers2 = list(next(rows2))
@@ -317,6 +308,67 @@ def parse(path: str | Path) -> RVToolsInventory:
         )
 
     # ------------------------------------------------------------------
+    # Resolve TCO baseline scope and populate primary inv fields
+    # ------------------------------------------------------------------
+    inv.vhost_available = vhost_found
+    if include_powered_off is None:
+        # Auto-detect: powered-on only when vHost confirms complete inventory;
+        # all VMs when vHost is absent.
+        resolved_poff = not vhost_found
+    else:
+        resolved_poff = include_powered_off
+    inv.include_powered_off_applied = resolved_poff
+
+    if resolved_poff:
+        # TCO baseline = all VMs (vHost absent, or explicit override=True)
+        inv.num_vms               = num_vms_all
+        inv.total_vcpu            = total_vcpu_all
+        inv.total_vmemory_gb      = round(total_mem_mb_all * MB_TO_GB, 2)
+        inv.total_storage_in_use_gb = round(total_stor_mib_all * MIB_TO_GB, 2)
+        inv._win_vcpus     = win_vcpus_all      # type: ignore[attr-defined]
+        inv._win_esu_vcpus = win_esu_vcpus_all  # type: ignore[attr-defined]
+        win_unversioned    = win_unversioned_all
+    else:
+        # TCO baseline = powered-on only (vHost present, or explicit override=False)
+        inv.num_vms               = num_vms_on
+        inv.total_vcpu            = total_vcpu_on
+        inv.total_vmemory_gb      = round(total_mem_mb_on * MB_TO_GB, 2)
+        inv.total_storage_in_use_gb = round(total_stor_mib_on * MIB_TO_GB, 2)
+        inv._win_vcpus     = win_vcpus_on       # type: ignore[attr-defined]
+        inv._win_esu_vcpus = win_esu_vcpus_on   # type: ignore[attr-defined]
+        win_unversioned    = win_unversioned_on
+
+    # Azure sizing: always powered-on regardless of TCO scope
+    inv.num_vms_poweredon          = num_vms_on
+    inv.total_vcpu_poweredon       = total_vcpu_on
+    inv.total_vmemory_gb_poweredon = round(total_mem_mb_on * MB_TO_GB, 2)
+    inv.total_storage_poweredon_gb = round(total_stor_mib_on * MIB_TO_GB, 2)
+
+    inv.windows_vms_unknown_version  = win_unversioned
+    inv.esu_count_may_be_understated = win_unversioned > 0
+
+    # Log which scope was applied and why
+    scope_label = "all VMs" if resolved_poff else "powered-on VMs only"
+    if include_powered_off is not None:
+        reason = f"override (include_powered_off={include_powered_off})"
+    elif vhost_found:
+        reason = "vHost tab present"
+    else:
+        reason = "vHost tab absent"
+    print(f"[rvtools_parser] TCO baseline: {scope_label} ({inv.num_vms:,} VMs) — {reason}")
+
+    if win_unversioned > 0:
+        warnings.append(
+            f"ESU undercount likely: {win_unversioned} Windows Server VMs in the "
+            f"TCO baseline scope have no version string in either OS column "
+            f"(config file or VMware Tools).  These are likely pre-2016 VMs "
+            f"(2003/2008/2008 R2) that are ESU-eligible but undetectable from "
+            f"RVtools OS strings alone.  Review and override 'pCores with ESU' "
+            f"in the intake form using a separate OS audit (e.g. MAP Toolkit, "
+            f"Azure Migrate, or manual review)."
+        )
+
+    # ------------------------------------------------------------------
     # Derive Windows/SQL pCore estimates using the vCPU/core ratio
     # ------------------------------------------------------------------
     ratio = inv.vcpu_per_core_ratio if inv.vcpu_per_core_ratio > 0 else 1.0
@@ -342,14 +394,17 @@ def parse(path: str | Path) -> RVToolsInventory:
 
 def summarize(inv: RVToolsInventory) -> None:
     """Print a human-readable summary of a parsed RVToolsInventory."""
+    scope = "all VMs" if inv.include_powered_off_applied else "powered-on only"
     print(f"Source: {inv.source_file}")
+    print(f"  vHost data available:         {'yes' if inv.vhost_available else 'no':>10}")
+    print(f"  TCO baseline scope:           {scope}")
     print()
-    print("  ── On-Prem TCO Baseline (all VMs, incl. powered-off) ──")
-    print(f"  VMs (total):                  {inv.num_vms:>10,}")
+    print(f"  ── On-Prem TCO Baseline ({scope}) ──")
+    print(f"  VMs:                          {inv.num_vms:>10,}")
+    print(f"  Hosts:                        {inv.num_hosts:>10,}")
     print(f"  Total vCPU:                   {inv.total_vcpu:>10,}")
     print(f"  Total vMemory (GB):           {inv.total_vmemory_gb:>10,.1f}")
     print(f"  Storage in use (GB):          {inv.total_storage_in_use_gb:>10,.1f}")
-    print(f"  Hosts:                        {inv.num_hosts:>10,}")
     print(f"  Host pCores (total):          {inv.total_host_pcores:>10,}")
     print(f"  Host Memory GB:               {inv.total_host_memory_gb:>10,.1f}")
     print(f"  vCPUs per pCore (avg):        {inv.vcpu_per_core_ratio:>10.3f}")
@@ -361,7 +416,7 @@ def summarize(inv: RVToolsInventory) -> None:
     print(f"  pCores w/ SQL Server:         {inv.pcores_with_sql_server:>10,}")
     print(f"  pCores w/ SQL ESU:            {inv.pcores_with_sql_esu:>10,}")
     print()
-    print("  ── Azure Migration Target (powered-on VMs only) ──")
+    print("  ── Azure Migration Target (powered-on only) ──")
     print(f"  VMs (powered-on):             {inv.num_vms_poweredon:>10,}")
     print(f"  vCPU (powered-on):            {inv.total_vcpu_poweredon:>10,}")
     print(f"  vMemory GB (powered-on):      {inv.total_vmemory_gb_poweredon:>10,.1f}")
