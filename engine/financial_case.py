@@ -80,6 +80,16 @@ class FinancialCase:
     az_microsoft_funding: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
     az_existing_azure_run_rate: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
 
+    # ---------- Cash Flow view: hardware acquisition (CAPEX basis) ----------
+    # Populated by compute() from depreciation.forward_acquisition
+    sq_server_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    sq_storage_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    sq_nw_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    # Azure case: retained (un-migrated) fraction of hardware acquisition
+    az_server_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_storage_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_nw_acquisition: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+
     # ---------- Computed summaries ----------
     def sq_total_hardware(self) -> list[float]:
         return [
@@ -136,9 +146,86 @@ class FinancialCase:
         ]
 
     def savings(self) -> list[float]:
-        """Status Quo - Azure Case. Positive = Azure is cheaper."""
+        """Status Quo - Azure Case (P&L). Positive = Azure is cheaper."""
         sq = self.sq_total()
         az = self.az_total()
+        return [sq[i] - az[i] for i in range(YEARS + 1)]
+
+    # ------------------------------------------------------------------
+    # Cash Flow view (acquisition-based CAPEX instead of depreciation)
+    # ------------------------------------------------------------------
+
+    def sq_capex(self) -> list[float]:
+        """SQ annual CAPEX: hardware acquisition (server + storage + NW)."""
+        return [
+            self.sq_server_acquisition[i] + self.sq_storage_acquisition[i] + self.sq_nw_acquisition[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def sq_opex_cf(self) -> list[float]:
+        """SQ OPEX: all non-CAPEX costs (maintenance, DC facilities, licenses, IT admin)."""
+        return [
+            self.sq_server_maintenance[i] + self.sq_storage_maintenance[i]
+            + self.sq_storage_backup_cost[i] + self.sq_storage_dr_cost[i]
+            + self.sq_nw_maintenance[i] + self.sq_bandwidth[i]
+            + self.sq_dc_space[i] + self.sq_dc_power[i]
+            + self.sq_total_licenses()[i] + self.sq_system_admin[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def sq_total_cf(self) -> list[float]:
+        """SQ total cashflow = CAPEX + OPEX."""
+        cap = self.sq_capex()
+        ops = self.sq_opex_cf()
+        return [cap[i] + ops[i] for i in range(YEARS + 1)]
+
+    def az_capex_cf(self) -> list[float]:
+        """Azure case CAPEX: retained (un-migrated) hardware acquisition."""
+        return [
+            self.az_server_acquisition[i] + self.az_storage_acquisition[i] + self.az_nw_acquisition[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def az_opex_cf(self) -> list[float]:
+        """Azure case OPEX: retained on-prem ops (maintenance, DC, licenses, IT admin)."""
+        return [
+            self.az_server_maintenance[i] + self.az_storage_maintenance[i]
+            + self.az_storage_backup_cost[i] + self.az_storage_dr_cost[i]
+            + self.az_nw_maintenance[i] + self.az_bandwidth[i]
+            + self.az_dc_space[i] + self.az_dc_power[i]
+            + self.az_virtualization_licenses[i] + self.az_windows_licenses[i]
+            + self.az_sql_licenses[i] + self.az_windows_esu[i] + self.az_sql_esu[i]
+            + self.az_backup_software[i] + self.az_dr_software[i]
+            + self.az_system_admin[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def az_azure_costs_cf(self) -> list[float]:
+        """Azure cloud consumption costs (new Azure + existing run rate)."""
+        return [
+            self.az_azure_consumption[i] + self.az_existing_azure_run_rate[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def az_migration_cf(self) -> list[float]:
+        """Net migration one-time costs (gross + Microsoft funding)."""
+        return [
+            self.az_migration_costs[i] + self.az_microsoft_funding[i]
+            for i in range(YEARS + 1)
+        ]
+
+    def az_total_cf(self) -> list[float]:
+        """Azure case total cashflow = retained CAPEX + retained OPEX + Azure costs + migration."""
+        cap = self.az_capex_cf()
+        ops = self.az_opex_cf()
+        azur = self.az_azure_costs_cf()
+        mig = self.az_migration_cf()
+        return [cap[i] + ops[i] + azur[i] + mig[i] for i in range(YEARS + 1)]
+
+    def cf_savings(self) -> list[float]:
+        """Cashflow savings: SQ total CF - Azure total CF. Positive = Azure saves cash."""
+        sq = self.sq_total_cf()
+        az = self.az_total_cf()
         return [sq[i] - az[i] for i in range(YEARS + 1)]
 
 
@@ -218,13 +305,18 @@ def compute(
         for yr in range(1, YEARS + 1):
             existing_az[yr] = monthly * 12
 
-    # Forward depreciation: slice from LOOKBACK position
+    # Forward depreciation AND acquisition: slice from LOOKBACK position
     depr_servers = depreciation.servers.forward_depreciation
     depr_storage = depreciation.storage.forward_depreciation
     depr_nw = depreciation.network_fitout.forward_depreciation
+    acq_servers = depreciation.servers.forward_acquisition
+    acq_storage = depreciation.storage.forward_acquisition
+    acq_nw = depreciation.network_fitout.forward_acquisition
 
     for yr in range(YEARS + 1):
-        # --- Status Quo ---
+        retained_frac = max(0.0, 1.0 - _avg_ramp(inputs, yr))
+
+        # --- Status Quo: P&L (depreciation-based) ---
         fc.sq_server_depreciation[yr] = depr_servers[yr]
         fc.sq_server_maintenance[yr] = status_quo.server_maintenance[yr]
         fc.sq_storage_depreciation[yr] = depr_storage[yr]
@@ -245,14 +337,19 @@ def compute(
         fc.sq_dr_software[yr] = status_quo.dr_software[yr]
         fc.sq_system_admin[yr] = status_quo.system_admin_staff[yr]
 
-        # --- Azure Case: retained on-prem ---
-        fc.az_server_depreciation[yr] = depr_servers[yr] * (1 - _avg_ramp(inputs, yr))
+        # --- Status Quo: cashflow CAPEX (hardware acquisition) ---
+        fc.sq_server_acquisition[yr] = acq_servers[yr]
+        fc.sq_storage_acquisition[yr] = acq_storage[yr]
+        fc.sq_nw_acquisition[yr] = acq_nw[yr]
+
+        # --- Azure Case: retained on-prem (P&L) ---
+        fc.az_server_depreciation[yr] = depr_servers[yr] * retained_frac
         fc.az_server_maintenance[yr] = retained.server_maintenance[yr]
-        fc.az_storage_depreciation[yr] = depr_storage[yr] * (1 - _avg_ramp(inputs, yr))
+        fc.az_storage_depreciation[yr] = depr_storage[yr] * retained_frac
         fc.az_storage_maintenance[yr] = retained.storage_maintenance[yr]
         fc.az_storage_backup_cost[yr] = retained.backup_storage_cost[yr]
         fc.az_storage_dr_cost[yr] = retained.dr_storage_cost[yr]
-        fc.az_nw_depreciation[yr] = depr_nw[yr] * (1 - _avg_ramp(inputs, yr))
+        fc.az_nw_depreciation[yr] = depr_nw[yr] * retained_frac
         fc.az_nw_maintenance[yr] = retained.network_maintenance[yr]
         fc.az_bandwidth[yr] = retained.bandwidth[yr]
         fc.az_dc_space[yr] = retained.dc_lease_space[yr]
@@ -265,6 +362,11 @@ def compute(
         fc.az_backup_software[yr] = retained.backup_software[yr]
         fc.az_dr_software[yr] = retained.dr_software[yr]
         fc.az_system_admin[yr] = retained.system_admin_staff[yr]
+
+        # --- Azure Case: cashflow CAPEX (retained hardware acquisition) ---
+        fc.az_server_acquisition[yr] = acq_servers[yr] * retained_frac
+        fc.az_storage_acquisition[yr] = acq_storage[yr] * retained_frac
+        fc.az_nw_acquisition[yr] = acq_nw[yr] * retained_frac
 
         # --- Azure Case: Azure-only costs ---
         fc.az_azure_consumption[yr] = az_consumption[yr]

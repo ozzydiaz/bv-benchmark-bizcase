@@ -66,6 +66,31 @@ class BusinessCaseSummary:
     # Net Interest Income
     nii: NetInterestIncome | None = None
 
+    # ------------------------------------------------------------------
+    # Cash Flow view (acquisition-based CAPEX instead of depreciation)
+    # ------------------------------------------------------------------
+    # Per-year arrays, index 0 = Y0, index 1 = Y1 … index 10 = Y10
+    sq_cf_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_cf_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    # SQ breakdown
+    sq_cf_capex_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    sq_cf_opex_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    # Azure breakdown
+    az_cf_capex_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_cf_opex_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_cf_azure_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    az_cf_migration_by_year: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    # Cashflow savings (SQ CF - Azure CF)
+    annual_cf_savings: list[float] = field(default_factory=lambda: [0.0] * (YEARS + 1))
+    # Cashflow NPVs
+    npv_cf_10yr: float = 0.0
+    npv_cf_5yr: float = 0.0
+    # Cashflow totals
+    total_sq_cf_10yr: float = 0.0
+    total_az_cf_10yr: float = 0.0
+    total_sq_cf_5yr: float = 0.0
+    total_az_cf_5yr: float = 0.0
+
 
 def _npv(cash_flows: list[float], wacc: float, years: int = YEARS) -> float:
     """Compute NPV of a cash flow series (index 0 = Y0, discounted from Y1)."""
@@ -198,6 +223,25 @@ def compute(
 
     # Net Interest Income
     summary.nii = compute_nii(fc, benchmarks)
+
+    # ------------------------------------------------------------------
+    # Cash Flow view
+    # ------------------------------------------------------------------
+    summary.sq_cf_by_year = fc.sq_total_cf()
+    summary.az_cf_by_year = fc.az_total_cf()
+    summary.sq_cf_capex_by_year = fc.sq_capex()
+    summary.sq_cf_opex_by_year = fc.sq_opex_cf()
+    summary.az_cf_capex_by_year = fc.az_capex_cf()
+    summary.az_cf_opex_by_year = fc.az_opex_cf()
+    summary.az_cf_azure_by_year = fc.az_azure_costs_cf()
+    summary.az_cf_migration_by_year = fc.az_migration_cf()
+    summary.annual_cf_savings = fc.cf_savings()
+    summary.npv_cf_10yr = _npv(summary.annual_cf_savings, wacc, YEARS)
+    summary.npv_cf_5yr = _npv(summary.annual_cf_savings, wacc, 5)
+    summary.total_sq_cf_10yr = sum(fc.sq_total_cf()[1:])
+    summary.total_az_cf_10yr = sum(fc.az_total_cf()[1:])
+    summary.total_sq_cf_5yr = sum(fc.sq_total_cf()[1:6])
+    summary.total_az_cf_5yr = sum(fc.az_total_cf()[1:6])
 
     return summary
 
