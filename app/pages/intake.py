@@ -70,13 +70,20 @@ def render():
             with st.spinner("Parsing RVtools file..."):
                 inventory = parse_rvtools(tmp_path)
             st.success("RVtools file parsed.")
+            st.caption("**On-Prem TCO Baseline** — all VMs (incl. powered-off)")
             col_a, col_b = st.columns(2)
-            col_a.metric("VMs detected", f"{inventory.num_vms:,}")
-            col_b.metric("Hosts detected", f"{inventory.num_hosts:,}")
+            col_a.metric("VMs (total)", f"{inventory.num_vms:,}")
+            col_b.metric("Hosts", f"{inventory.num_hosts:,}")
             col_a.metric("Total vCPU", f"{inventory.total_vcpu:,}")
             col_b.metric("Total vMemory (GB)", f"{inventory.total_vmemory_gb:,.0f}")
             col_a.metric("Storage in use (GB)", f"{inventory.total_storage_in_use_gb:,.0f}")
             col_b.metric("vCPUs per pCore (avg)", f"{inventory.vcpu_per_core_ratio:.2f}")
+            st.caption("**Azure Migration Target** — powered-on VMs only")
+            col_c, col_d = st.columns(2)
+            col_c.metric("VMs (powered-on)", f"{inventory.num_vms_poweredon:,}")
+            col_d.metric("vCPU (powered-on)", f"{inventory.total_vcpu_poweredon:,}")
+            col_c.metric("vMemory GB (powered-on)", f"{inventory.total_vmemory_gb_poweredon:,.0f}")
+            col_d.metric("Storage GB (powered-on)", f"{inventory.total_storage_poweredon_gb:,.0f}")
             if inventory.parse_warnings:
                 for w in inventory.parse_warnings:
                     st.warning(w)

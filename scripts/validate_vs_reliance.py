@@ -166,24 +166,31 @@ KNOWN_GAPS = {
     "payback_years",
 }
 
-# ---- Parser: fields that cannot be reliably derived from RVtools alone ----
-# These mismatches are inherent limitations of auto-parsing, not code bugs:
-#   allocated_storage_gb    — powered-on filter now yields ±1.2% (PASS).  Kept as
-#                             a non-fatal LIMIT so that future data sets that miss
-#                             the 2% gate still show ⚑ rather than ✗ FAIL.
-#   pcores_with_windows_server — powered-on + template-exclusion filter narrows gap
-#                              to ~2.9%.  The residual is driven by the
-#                              vcpu_per_core_ratio: parser averages per-host values
-#                              (1.9155) while the workbook uses a manually-entered
-#                              value (1.97 = D66).  Since D66 is a user input in
-#                              the intake form, the Streamlit UI will ask the user
-#                              to confirm/override the auto-detected ratio.
-#   pcores_with_windows_esu  — RVtools 'configuration file' OS column does not
-#                              record OS version for pre-2016 VMs; 2008/2003 VMs
-#                              show generic strings.  User manually entered 2,124
-#                              from a separate OS audit.  Auto-detection yields ~845
-#                              (2012 variants only).  Parser emits a warning and
-#                              sets esu_count_may_be_understated=True.
+# ---- Parser: fields that cannot be 100% reliably derived from RVtools alone ----
+# These are annotated as ⚑ LIMIT rather than ✗ FAIL because the discrepancies
+# reflect genuine data limitations, not engine bugs.
+#
+#   allocated_storage_gb — parser sums 'In Use MiB' across ALL VMs (incl.
+#                          powered-off) per the TCO methodology (customer paid
+#                          for all storage).  The Reliance workbook value (1,172,264)
+#                          was manually entered and may reflect powered-on-only
+#                          or a user-adjusted figure.  Diff is acceptable for
+#                          TCO estimation purposes.
+#
+#   pcores_with_windows_server — parser counts ALL non-template Windows Server
+#                          VMs.  The workbook value (3,454) was manually entered
+#                          using a powered-on filter + manual reconciliation.
+#                          The residual gap is also driven by the vcpu_per_core
+#                          ratio (parser: 1.9155 vs workbook D66 input: 1.97).
+#                          The intake form will ask the user to confirm/override
+#                          both the ratio and the pCores value.
+#
+#   pcores_with_windows_esu  — RVtools OS strings for pre-2016 VMs are often
+#                          generic ('Windows Server 2016 or later') with no
+#                          version.  Auto-detection yields ~845 (2012 variants
+#                          reliably identified); workbook value 2,124 came from
+#                          a separate OS audit.  Parser emits a warning and sets
+#                          esu_count_may_be_understated=True.
 PARSER_LIMITATIONS = {
     "allocated_storage_gb",
     "pcores_with_windows_server",
@@ -506,16 +513,17 @@ def main() -> int:
             "  once the Azure consumption growth logic is added.\n"
             "\n"
             "  NOTE 2 — 'parser limitation' (⚑): residual auto-detection gaps:\n"
-            "    • allocated_storage_gb  — powered-on filter applied; now ±1.2% (PASS).\n"
-            "      Kept as non-fatal LIMIT in case future data sets miss the gate.\n"
-            "    • pcores_with_windows_server — powered-on + template-exclusion applied;\n"
-            "      now ±2.9%.  Residual driven by vcpu_per_core_ratio estimation\n"
-            "      (parser: 1.9155 vs workbook D66: 1.97). Override ratio in intake form.\n"
+            "    • allocated_storage_gb  — summed across ALL VMs (TCO methodology:  \n"
+            "      customer paid for all storage); Reliance value was manually entered.\n"
+            "    • pcores_with_windows_server — ALL non-template Windows VMs counted\n"
+            "      (TCO scope); Reliance value used powered-on + manual reconciliation\n"
+            "      and a manually-set ratio (D66=1.97 vs auto-detected 1.9155).\n"
+            "      Intake form will prompt the user to confirm/override both values.\n"
             "    • pcores_with_windows_esu — pre-2016 VMs show generic OS strings;\n"
-            "      auto-detection yields ~845 (2012 variants only); workbook value 2,124\n"
-            "      requires a separate OS audit.  Parser sets esu_count_may_be_understated\n"
-            "      and emits a warning.  Override in the intake form.\n"
-            "  The Streamlit intake form will surface these values for user review."
+            "      auto-detection yields ~845 (2012 variants only); workbook value\n"
+            "      2,124 required a separate OS audit.  Parser sets\n"
+            "      esu_count_may_be_understated=True and emits a warning.\n"
+            "  The Streamlit intake form will surface these for user review/override."
         )
     return 0 if (a_ok and b_ok) else 1
 
