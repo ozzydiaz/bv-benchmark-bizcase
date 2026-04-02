@@ -5,6 +5,16 @@ Run with:
     streamlit run app/main.py
 """
 
+import sys
+from pathlib import Path
+
+# Ensure the project root is on sys.path regardless of how Streamlit is invoked.
+# Streamlit adds the script's directory (app/) to sys.path, not the project root,
+# which breaks absolute imports like 'from app.pages import ...'.
+_PROJECT_ROOT = Path(__file__).parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 import streamlit as st
 
 st.set_page_config(
