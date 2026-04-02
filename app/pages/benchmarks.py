@@ -254,33 +254,43 @@ def render():
     # ----------------------------------------------------------------
     with st.expander("📐 Right-Sizing Parameters"):
         st.caption(
-            "Used by the auto-derivation pipeline when building the Consumption Plan from RVtools data."
+            "Used by the auto-derivation pipeline when building the Consumption Plan from RVtools data. "
+            "Telemetry-based sizing (vCPU / vMemory tabs) takes priority; fallback factors apply only "
+            "when utilisation data is absent for a given VM."
         )
-        c1, c2, c3 = st.columns(3)
+        c1, c2 = st.columns(2)
         with c1:
+            st.markdown("**When telemetry is available**")
             bm.utilization_percentile = st.number_input(
                 "Utilisation Percentile (P-value)", value=float(bm.utilization_percentile),
                 step=1.0, min_value=50.0, max_value=99.0, key="bm_pval",
-                help="P-value used for CPU and memory right-sizing. Default P95.")
+                help="P-value used for per-VM CPU and memory right-sizing. Default P95.")
             bm.utilization_percentile = int(bm.utilization_percentile)
             bm.cpu_rightsizing_headroom_factor = _pct(
-                "CPU Headroom above P-value", bm.cpu_rightsizing_headroom_factor, "bm_cpu_hd",
-                help="Headroom buffer added above P95 CPU target. Default 20%.")
-        with c2:
+                "CPU Headroom above utilisation", bm.cpu_rightsizing_headroom_factor, "bm_cpu_hd",
+                help="Buffer added on top of the utilised fraction after rightsizing. Default 20%.")
             bm.memory_rightsizing_headroom_factor = _pct(
-                "Memory Headroom above P-value", bm.memory_rightsizing_headroom_factor, "bm_mem_hd",
-                help="Headroom buffer added above P95 memory target. Default 20%.")
-            bm.storage_rightsizing_headroom_factor = st.number_input(
-                "Storage Headroom Multiplier", value=bm.storage_rightsizing_headroom_factor,
-                step=0.05, format="%.2f", key="bm_stor_hd",
-                help="Provisioned storage × this factor for Azure sizing. Default 1.20.")
-        with c3:
-            bm.cpu_rightsizing_fallback_reduction = _pct(
-                "CPU Fallback Reduction (no vCPU tab)", bm.cpu_rightsizing_fallback_reduction, "bm_cpu_fb",
-                help="vCPU reduction applied when the vCPU tab is absent from RVtools. Default 40%.")
-            bm.memory_rightsizing_fallback_reduction = _pct(
-                "Memory Fallback Reduction (no vMemory tab)", bm.memory_rightsizing_fallback_reduction, "bm_mem_fb",
-                help="Memory reduction applied when the vMemory tab is absent from RVtools. Default 20%.")
+                "Memory Headroom above utilisation", bm.memory_rightsizing_headroom_factor, "bm_mem_hd",
+                help="Buffer added on top of the utilised fraction after rightsizing. Default 20%.")
+        with c2:
+            st.markdown("**When telemetry is absent (fallback assumptions)**")
+            st.caption(
+                "Applied per VM when vCPU / vMemory / vHost tabs provide no utilisation signal. "
+                "Override when you have knowledge of how the environment is run."
+            )
+            bm.cpu_util_fallback_factor = _pct(
+                "CPU retain factor (no telemetry)", bm.cpu_util_fallback_factor, "bm_cpu_fb",
+                help="Fraction of allocated vCPU to target in Azure when no utilisation data. "
+                     "Default 40% (≡ 60% reduction). E.g. 0.40 → a 8-vCPU VM targets 4 vCPU before headroom.")
+            bm.mem_util_fallback_factor = _pct(
+                "Memory retain factor (no telemetry)", bm.mem_util_fallback_factor, "bm_mem_fb",
+                help="Fraction of allocated memory to target in Azure when no utilisation data. "
+                     "Default 60% (≡ 40% reduction). E.g. 0.60 → a 16 GiB VM targets 10 GiB before headroom.")
+            bm.storage_prov_reduction_factor = _pct(
+                "Storage reduction vs Provisioned (last resort)", bm.storage_prov_reduction_factor, "bm_stor_fb",
+                help="Applied to vInfo Provisioned MiB when vDisk, vPartition, and In Use are all absent. "
+                     "Default 20% reduction (retain 80% of provisioned). "
+                     "Priority: vDisk Capacity → vPartition Consumed → vInfo In Use → Provisioned × (1−this).")
 
     # ----------------------------------------------------------------
     # Save / Reset
