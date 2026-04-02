@@ -102,8 +102,16 @@ class RVToolsInventory:
     pcores_with_windows_esu: int = 0
     esu_count_may_be_understated: bool = False
     windows_vms_unknown_version: int = 0  # Windows VMs with no detectable version
-    pcores_with_sql_server: int = 0       # default: 10% of windows
+    pcores_with_sql_server: int = 0       # default: 10% of windows; overridden by Application detection
     pcores_with_sql_esu: int = 0          # default: 10% of windows_esu
+
+    # SQL detection from Application custom attribute (col 77 in vInfo).
+    # When sql_vms_detected > 0 it overrides the 10% Windows default above.
+    # Prod/non-Prod split is informational (for presentation); not used in TCO math.
+    sql_vms_detected: int = 0             # VMs with 'sql' in Application or OS
+    sql_vms_prod: int = 0                 # subset where Environment == 'Production'
+    sql_vms_nonprod: int = 0              # remainder
+    sql_detection_source: str = "default"  # 'application' | 'default'
 
     # ── AZURE MIGRATION TARGET (powered-on VMs only) ──
     num_vms_poweredon: int = 0
@@ -204,6 +212,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     total_stor_mib_on = 0.0
     win_vcpus_on = 0;      win_esu_vcpus_on = 0;  win_unversioned_on = 0
     vhost_found = False
+    # SQL-from-Application tracking (all-VM scope, silent columns)
+    sql_vcpus_all = 0; sql_vms_all = 0; sql_prod_all = 0; sql_nonprod_all = 0
 
     # ------------------------------------------------------------------
     # vInfo tab
@@ -223,6 +233,9 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         ci_stor     = _col_index(headers, COL_IN_USE_MIB, warnings)
         ci_os_cfg   = _col_index(headers, COL_OS_CONFIG,  warnings)
         ci_os_tools = _col_index(headers, COL_OS_TOOLS,   warnings)
+        # Optional custom-attribute columns — silent on miss (customer-specific)
+        ci_app      = _col_index(headers, "Application",  [])
+        ci_env      = _col_index(headers, "Environment",  [])
 
         for row in rows:
             if ci_name is not None and row[ci_name] is None:
@@ -256,6 +269,15 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 or bool(_WINDOWS_ESU_PATTERN.search(os_tools))
             )
 
+            # SQL detection: Application custom attribute (preferred) + OS fallback
+            app_str = str(row[ci_app] or "").lower() if ci_app is not None else ""
+            env_str = str(row[ci_env] or "").lower() if ci_env is not None else ""
+            is_sql = (
+                "sql" in app_str
+                or "sql server" in os_cfg.lower()
+                or "sql server" in os_tools.lower()
+            )
+
             # ── All-VM accumulators ──
             num_vms_all += 1
             if isinstance(cpus, (int, float)):
@@ -270,6 +292,13 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                     win_esu_vcpus_all += vm_cpus
                 else:
                     win_unversioned_all += 1
+            if is_sql:
+                sql_vcpus_all += vm_cpus
+                sql_vms_all += 1
+                if "production" in env_str:
+                    sql_prod_all += 1
+                else:
+                    sql_nonprod_all += 1
 
             # ── Powered-on accumulators ──
             if is_on:
@@ -431,8 +460,27 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     win_esu_vcpus = getattr(inv, "_win_esu_vcpus", 0)
     inv.pcores_with_windows_server = round(win_vcpus / ratio)
     inv.pcores_with_windows_esu = round(win_esu_vcpus / ratio)
-    inv.pcores_with_sql_server = round(inv.pcores_with_windows_server * 0.10)
-    inv.pcores_with_sql_esu = round(inv.pcores_with_windows_esu * 0.10)
+
+    # SQL pCores: prefer Application-detected count; fall back to 10% of Windows
+    inv.sql_vms_detected = sql_vms_all
+    inv.sql_vms_prod     = sql_prod_all
+    inv.sql_vms_nonprod  = sql_nonprod_all
+    if sql_vcpus_all > 0:
+        inv.pcores_with_sql_server = round(sql_vcpus_all / ratio)
+        inv.sql_detection_source   = "application"
+        # ESU SQL pCores: proportion of SQL pCores relative to total Windows
+        win_pcore_total = max(inv.pcores_with_windows_server, 1)
+        sql_esu_fraction = inv.pcores_with_windows_esu / win_pcore_total
+        inv.pcores_with_sql_esu = round(inv.pcores_with_sql_server * sql_esu_fraction)
+        print(
+            f"[rvtools_parser] SQL detection (Application): "
+            f"{sql_vms_all} VMs → {inv.pcores_with_sql_server} pCores  "
+            f"({sql_prod_all} Prod / {sql_nonprod_all} non-Prod declared)"
+        )
+    else:
+        inv.pcores_with_sql_server = round(inv.pcores_with_windows_server * 0.10)
+        inv.pcores_with_sql_esu    = round(inv.pcores_with_windows_esu * 0.10)
+        inv.sql_detection_source   = "default"
 
     # Clean up private attrs
     for attr in ("_win_vcpus", "_win_esu_vcpus"):
