@@ -20,6 +20,9 @@ import openpyxl
 # Column name constants
 # ---------------------------------------------------------------------------
 
+import logging
+_log = logging.getLogger(__name__)
+
 # vInfo columns
 COL_VM_NAME = "VM"
 COL_POWERSTATE = "Powerstate"
@@ -470,7 +473,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         reason = "vHost tab present"
     else:
         reason = "vHost tab absent"
-    print(f"[rvtools_parser] TCO baseline: {scope_label} ({inv.num_vms:,} VMs) — {reason}")
+    _log.debug(f"[rvtools_parser] TCO baseline: {scope_label} ({inv.num_vms:,} VMs) — {reason}")
 
     if win_unversioned > 0:
         warnings.append(
@@ -506,7 +509,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         sql_esu_fraction = inv.pcores_with_windows_esu / win_pcore_total
         inv.pcores_with_sql_esu = round(inv.pcores_with_sql_server * sql_esu_fraction)
         prod_note = "assumed prod — no env tags" if inv.sql_prod_assumed else f"{sql_prod_all} Prod / {sql_nonprod_all} non-Prod"
-        print(
+        _log.debug(
             f"[rvtools_parser] SQL detection (Application): "
             f"{sql_vms_all} VMs → {inv.pcores_with_sql_server} pCores  ({prod_note})"
         )
@@ -546,7 +549,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             p = min(int(len(cpu_utils) * 0.95), len(cpu_utils) - 1)
             inv.cpu_util_p95 = round(cpu_utils[p], 4)
             inv.cpu_util_p95_vm_count = len(cpu_utils)
-            print(
+            _log.debug(
                 f"[rvtools_parser] CPU P95 utilisation: {inv.cpu_util_p95:.1%}"
                 f" ({inv.cpu_util_p95_vm_count:,} powered-on VMs)"
             )
@@ -582,7 +585,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             p = min(int(len(mem_utils) * 0.95), len(mem_utils) - 1)
             inv.memory_util_p95 = round(mem_utils[p], 4)
             inv.memory_util_p95_vm_count = len(mem_utils)
-            print(
+            _log.debug(
                 f"[rvtools_parser] Memory P95 utilisation: {inv.memory_util_p95:.1%}"
                 f" ({inv.memory_util_p95_vm_count:,} powered-on VMs)"
             )
@@ -630,7 +633,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         inv.total_disk_provisioned_gb           = round(total_cap_mib_all * MIB_TO_GB, 2)
         inv.total_disk_provisioned_poweredon_gb = round(total_cap_mib_on  * MIB_TO_GB, 2)
         inv.vm_disk_sizes_gb = vm_disks
-        print(
+        _log.debug(
             f"[rvtools_parser] vDisk provisioned: all={inv.total_disk_provisioned_gb:,.0f} GB  "
             f"powered-on={inv.total_disk_provisioned_poweredon_gb:,.0f} GB  "
             f"({len(vm_disks):,} VMs, {sum(len(v) for v in vm_disks.values()):,} disks)"
@@ -651,9 +654,9 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         inv.vcenter_fqdns = fqdns
 
     if warnings:
-        print(f"[rvtools_parser] {len(warnings)} warning(s):")
+        _log.debug(f"[rvtools_parser] {len(warnings)} warning(s):")
         for w in warnings:
-            print(f"  - {w}")
+            _log.debug(f"  - {w}")
 
     return inv
 
@@ -661,55 +664,55 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
 def summarize(inv: RVToolsInventory) -> None:
     """Print a human-readable summary of a parsed RVToolsInventory."""
     scope = "all VMs" if inv.include_powered_off_applied else "powered-on only"
-    print(f"Source: {inv.source_file}")
-    print(f"  vHost data available:         {'yes' if inv.vhost_available else 'no':>10}")
-    print(f"  TCO baseline scope:           {scope}")
-    print()
-    print(f"  ── On-Prem TCO Baseline ({scope}) ──")
-    print(f"  VMs:                          {inv.num_vms:>10,}")
-    print(f"  Hosts:                        {inv.num_hosts:>10,}")
-    print(f"  Total vCPU:                   {inv.total_vcpu:>10,}")
-    print(f"  Total vMemory (GB):           {inv.total_vmemory_gb:>10,.1f}")
-    print(f"  Storage in use (GB):          {inv.total_storage_in_use_gb:>10,.1f}")
-    print(f"  Host pCores (total):          {inv.total_host_pcores:>10,}")
-    print(f"  Host Memory GB:               {inv.total_host_memory_gb:>10,.1f}")
-    print(f"  vCPUs per pCore (avg):        {inv.vcpu_per_core_ratio:>10.3f}")
-    print(f"  pCores w/ Win Server:         {inv.pcores_with_windows_server:>10,}")
+    _log.debug(f"Source: {inv.source_file}")
+    _log.debug(f"  vHost data available:         {'yes' if inv.vhost_available else 'no':>10}")
+    _log.debug(f"  TCO baseline scope:           {scope}")
+    _log.debug()
+    _log.debug(f"  ── On-Prem TCO Baseline ({scope}) ──")
+    _log.debug(f"  VMs:                          {inv.num_vms:>10,}")
+    _log.debug(f"  Hosts:                        {inv.num_hosts:>10,}")
+    _log.debug(f"  Total vCPU:                   {inv.total_vcpu:>10,}")
+    _log.debug(f"  Total vMemory (GB):           {inv.total_vmemory_gb:>10,.1f}")
+    _log.debug(f"  Storage in use (GB):          {inv.total_storage_in_use_gb:>10,.1f}")
+    _log.debug(f"  Host pCores (total):          {inv.total_host_pcores:>10,}")
+    _log.debug(f"  Host Memory GB:               {inv.total_host_memory_gb:>10,.1f}")
+    _log.debug(f"  vCPUs per pCore (avg):        {inv.vcpu_per_core_ratio:>10.3f}")
+    _log.debug(f"  pCores w/ Win Server:         {inv.pcores_with_windows_server:>10,}")
     esu_note = "  ⚑ may be understated" if inv.esu_count_may_be_understated else ""
-    print(f"  pCores w/ Win ESU:            {inv.pcores_with_windows_esu:>10,}{esu_note}")
+    _log.debug(f"  pCores w/ Win ESU:            {inv.pcores_with_windows_esu:>10,}{esu_note}")
     if inv.esu_count_may_be_understated:
-        print(f"  Windows VMs w/ unknown ver:   {inv.windows_vms_unknown_version:>10,}  (check OS audit)")
-    print(f"  pCores w/ SQL Server:         {inv.pcores_with_sql_server:>10,}")
-    print(f"  pCores w/ SQL ESU:            {inv.pcores_with_sql_esu:>10,}")
-    print()
-    print("  ── Azure Migration Target (powered-on only) ──")
-    print(f"  VMs (powered-on):             {inv.num_vms_poweredon:>10,}")
-    print(f"  vCPU (powered-on):            {inv.total_vcpu_poweredon:>10,}")
-    print(f"  vMemory GB (powered-on):      {inv.total_vmemory_gb_poweredon:>10,.1f}")
-    print(f"  Storage GB (powered-on):      {inv.total_storage_poweredon_gb:>10,.1f}")
-    print()
-    print("  ── Utilisation Telemetry ──")
+        _log.debug(f"  Windows VMs w/ unknown ver:   {inv.windows_vms_unknown_version:>10,}  (check OS audit)")
+    _log.debug(f"  pCores w/ SQL Server:         {inv.pcores_with_sql_server:>10,}")
+    _log.debug(f"  pCores w/ SQL ESU:            {inv.pcores_with_sql_esu:>10,}")
+    _log.debug()
+    _log.debug("  ── Azure Migration Target (powered-on only) ──")
+    _log.debug(f"  VMs (powered-on):             {inv.num_vms_poweredon:>10,}")
+    _log.debug(f"  vCPU (powered-on):            {inv.total_vcpu_poweredon:>10,}")
+    _log.debug(f"  vMemory GB (powered-on):      {inv.total_vmemory_gb_poweredon:>10,.1f}")
+    _log.debug(f"  Storage GB (powered-on):      {inv.total_storage_poweredon_gb:>10,.1f}")
+    _log.debug()
+    _log.debug("  ── Utilisation Telemetry ──")
     if inv.cpu_util_p95 > 0:
-        print(f"  CPU P95 utilisation:          {inv.cpu_util_p95:>9.1%}  ({inv.cpu_util_p95_vm_count:,} VMs)")
+        _log.debug(f"  CPU P95 utilisation:          {inv.cpu_util_p95:>9.1%}  ({inv.cpu_util_p95_vm_count:,} VMs)")
     else:
-        print("  CPU P95 utilisation:            n/a  (vCPU tab absent or all VMs powered-off)")
+        _log.debug("  CPU P95 utilisation:            n/a  (vCPU tab absent or all VMs powered-off)")
     if inv.memory_util_p95 > 0:
-        print(f"  Memory P95 utilisation:       {inv.memory_util_p95:>9.1%}  ({inv.memory_util_p95_vm_count:,} VMs)")
+        _log.debug(f"  Memory P95 utilisation:       {inv.memory_util_p95:>9.1%}  ({inv.memory_util_p95_vm_count:,} VMs)")
     else:
-        print("  Memory P95 utilisation:         n/a  (vMemory tab absent)")
-    print()
-    print("  ── Region Evidence ──")
+        _log.debug("  Memory P95 utilisation:         n/a  (vMemory tab absent)")
+    _log.debug()
+    _log.debug("  ── Region Evidence ──")
     if inv.datacenter_names:
-        print(f"  Datacenter(s):  {', '.join(inv.datacenter_names)}")
+        _log.debug(f"  Datacenter(s):  {', '.join(inv.datacenter_names)}")
     if inv.timezone_names:
-        print(f"  Time zone(s):   {', '.join(inv.timezone_names)}")
+        _log.debug(f"  Time zone(s):   {', '.join(inv.timezone_names)}")
     if inv.gmt_offsets:
-        print(f"  GMT offset(s):  {', '.join(inv.gmt_offsets)}")
+        _log.debug(f"  GMT offset(s):  {', '.join(inv.gmt_offsets)}")
     if inv.domain_names:
-        print(f"  Domain(s):      {', '.join(inv.domain_names)}")
+        _log.debug(f"  Domain(s):      {', '.join(inv.domain_names)}")
     if inv.vcenter_fqdns:
-        print(f"  vCenter FQDN(s): {', '.join(inv.vcenter_fqdns)}")
+        _log.debug(f"  vCenter FQDN(s): {', '.join(inv.vcenter_fqdns)}")
     if inv.parse_warnings:
-        print(f"\n  Warnings ({len(inv.parse_warnings)}):")
+        _log.debug(f"\n  Warnings ({len(inv.parse_warnings)}):")
         for w in inv.parse_warnings:
-            print(f"    \u26a0  {w}")
+            _log.debug(f"    \u26a0  {w}")

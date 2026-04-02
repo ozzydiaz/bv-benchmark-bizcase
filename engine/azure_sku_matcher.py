@@ -33,6 +33,9 @@ from pathlib import Path
 # Constants
 # ---------------------------------------------------------------------------
 
+import logging
+_log = logging.getLogger(__name__)
+
 _PRICES_API = "https://prices.azure.com/api/retail/prices"
 _API_VERSION = "api-version=2023-01-01-preview"
 
@@ -110,7 +113,7 @@ def get_pricing(
         vcpu_rate, vm_sku = _fetch_vm_rate(region, timeout_sec)
         gb_rate, disk_sku = _fetch_disk_rate(region, timeout_sec)
     except Exception as exc:
-        print(f"[azure_sku_matcher] API fetch failed ({exc!s}) — using benchmark defaults")
+        _log.debug(f"[azure_sku_matcher] API fetch failed ({exc!s}) — using benchmark defaults")
         return AzurePricing(
             region=region,
             price_per_vcpu_hour_usd=benchmark_vcpu_rate,
@@ -121,11 +124,11 @@ def get_pricing(
 
     # ── Fallback if rates are missing ────────────────────────────────────
     if vcpu_rate <= 0:
-        print(f"[azure_sku_matcher] VM SKU not found in '{region}' — using benchmark vCPU rate")
+        _log.debug(f"[azure_sku_matcher] VM SKU not found in '{region}' — using benchmark vCPU rate")
         vcpu_rate = benchmark_vcpu_rate
         vm_sku = "benchmark"
     if gb_rate <= 0:
-        print(f"[azure_sku_matcher] Disk SKU not found in '{region}' — using benchmark GB rate")
+        _log.debug(f"[azure_sku_matcher] Disk SKU not found in '{region}' — using benchmark GB rate")
         gb_rate = benchmark_gb_rate
         disk_sku = "benchmark"
 
@@ -139,7 +142,7 @@ def get_pricing(
         fetched_at=time.time(),
     )
     _write_cache(cache_path, result)
-    print(
+    _log.debug(
         f"[azure_sku_matcher] {region}: {result.price_per_vcpu_hour_display} "
         f"| {result.price_per_gb_month_display}  (source={result.source})"
     )

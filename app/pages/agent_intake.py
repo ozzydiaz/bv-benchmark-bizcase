@@ -278,11 +278,11 @@ def render() -> None:
             "ECIF = Eligible Credit Investment Fund. Enter total amounts by year — leave 0 if not applicable."
         )
         fc1, fc2, fc3, fc4, fc5 = st.columns(5)
-        aco_y1  = fc1.number_input("ACO Year 1",  min_value=0.0, value=0.0, step=10_000.0, format="%,.0f")
-        aco_y2  = fc2.number_input("ACO Year 2",  min_value=0.0, value=0.0, step=10_000.0, format="%,.0f")
-        aco_y3  = fc3.number_input("ACO Year 3",  min_value=0.0, value=0.0, step=10_000.0, format="%,.0f")
-        ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%,.0f")
-        ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%,.0f")
+        aco_y1  = fc1.number_input("ACO Year 1",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
+        aco_y2  = fc2.number_input("ACO Year 2",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
+        aco_y3  = fc3.number_input("ACO Year 3",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
+        ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
+        ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
 
     # ── PARSE BUTTON ──────────────────────────────────────────────────────────
     parse_ready = uploaded is not None and client_name.strip()

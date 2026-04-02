@@ -19,6 +19,9 @@ from .net_interest_income import NetInterestIncome, compute as compute_nii
 from .status_quo import YEARS
 
 
+import logging
+_log = logging.getLogger(__name__)
+
 @dataclass
 class BusinessCaseSummary:
     """Key financial metrics for a business case run."""
@@ -251,32 +254,32 @@ def print_summary(summary: BusinessCaseSummary) -> None:
     def fmt(v: float) -> str:
         return f"${v:>15,.0f}"
 
-    print("\n=== Business Case Summary ===")
-    print(f"  10-Year NPV:                {fmt(summary.npv_10yr)}")
-    print(f"  10-Year NPV (w/ TV):        {fmt(summary.npv_10yr_with_terminal_value)}")
-    print(f"  5-Year NPV:                 {fmt(summary.npv_5yr)}")
-    print(f"  10-Year ROI:                {summary.roi_10yr:>14.1%}")
-    print(f"  5-Year ROI:                 {summary.roi_5yr:>14.1%}")
+    _log.debug("\n=== Business Case Summary ===")
+    _log.debug(f"  10-Year NPV:                {fmt(summary.npv_10yr)}")
+    _log.debug(f"  10-Year NPV (w/ TV):        {fmt(summary.npv_10yr_with_terminal_value)}")
+    _log.debug(f"  5-Year NPV:                 {fmt(summary.npv_5yr)}")
+    _log.debug(f"  10-Year ROI:                {summary.roi_10yr:>14.1%}")
+    _log.debug(f"  5-Year ROI:                 {summary.roi_5yr:>14.1%}")
     pb = f"{summary.payback_years:.1f} years" if summary.payback_years else "Not achieved"
-    print(f"  Payback Period:             {pb:>15s}")
-    print(f"  Year-10 Annual Savings:     {fmt(summary.savings_yr10)}")
-    print(f"  Year-10 Savings %:          {summary.savings_pct_yr10:>14.1%}")
-    print(f"  On-Prem Cost/VM/yr:         {fmt(summary.on_prem_cost_per_vm_yr)}")
-    print(f"  Azure Cost/VM/yr:           {fmt(summary.azure_cost_per_vm_yr)}")
-    print(f"  Savings/VM/yr:              {fmt(summary.savings_per_vm_yr)}")
-    print(f"\n  Waterfall (avg annual):")
+    _log.debug(f"  Payback Period:             {pb:>15s}")
+    _log.debug(f"  Year-10 Annual Savings:     {fmt(summary.savings_yr10)}")
+    _log.debug(f"  Year-10 Savings %:          {summary.savings_pct_yr10:>14.1%}")
+    _log.debug(f"  On-Prem Cost/VM/yr:         {fmt(summary.on_prem_cost_per_vm_yr)}")
+    _log.debug(f"  Azure Cost/VM/yr:           {fmt(summary.azure_cost_per_vm_yr)}")
+    _log.debug(f"  Savings/VM/yr:              {fmt(summary.savings_per_vm_yr)}")
+    _log.debug(f"\n  Waterfall (avg annual):")
     for k, v in summary.waterfall.items():
-        print(f"    {k:<40s}: {fmt(v)}")
-    print(f"\n  Annual Savings by Year:")
+        _log.debug(f"    {k:<40s}: {fmt(v)}")
+    _log.debug(f"\n  Annual Savings by Year:")
     for yr, s in enumerate(summary.annual_savings):
         if yr == 0:
             continue
-        print(f"    Y{yr:>2d}: {fmt(s)}")
+        _log.debug(f"    Y{yr:>2d}: {fmt(s)}")
     if summary.productivity:
         pb = summary.productivity
-        print(f"\n  IT Productivity Benefit:")
-        print(f"    FTEs saved at full migration: {pb.headcount_saved}")
-        print(f"    Annual benefit (full):        {fmt(pb.annual_benefit_full)}")
+        _log.debug(f"\n  IT Productivity Benefit:")
+        _log.debug(f"    FTEs saved at full migration: {pb.headcount_saved}")
+        _log.debug(f"    Annual benefit (full):        {fmt(pb.annual_benefit_full)}")
     if summary.nii:
         n = summary.nii
-        print(f"\n  Net Interest Income (discounted):  {fmt(n.total_discounted_nii)}")
+        _log.debug(f"\n  Net Interest Income (discounted):  {fmt(n.total_discounted_nii)}")

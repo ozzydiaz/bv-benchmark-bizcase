@@ -25,6 +25,9 @@ import yaml
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import logging
+_logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from engine.rvtools_parser import RVToolsInventory
 
@@ -135,4 +138,4 @@ def _match_keyword(dc_lower: str, kw_map: list[tuple[str, str | None]]) -> str |
 
 
 def _log(msg: str) -> None:
-    print(f"[region_guesser] {msg}")
+    _logger.debug(f"[region_guesser] {msg}")

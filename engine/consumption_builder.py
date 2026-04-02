@@ -44,11 +44,13 @@ All costs converted to local currency via usd_to_local.  ACD applied in Step 2.
 
 from __future__ import annotations
 
+import logging
 import math
 from typing import TYPE_CHECKING
 
+_log = logging.getLogger(__name__)
+
 from engine.models import (
-    BenchmarkConfig,
     ConsumptionPlan,
     MIGRATION_RAMP_PRESETS,
 )
@@ -141,7 +143,7 @@ def build(
 
     resolved_mode = storage_mode
     if storage_mode == "per_vm" and not vm_disks:
-        print("[consumption_builder] WARNING: per_vm mode requested but vDisk tab absent — falling back to aggregate")
+        _log.debug("[consumption_builder] WARNING: per_vm mode requested but vDisk tab absent — falling back to aggregate")
         resolved_mode = "aggregate"
 
     if resolved_mode == "per_vm":
@@ -178,7 +180,7 @@ def build(
     ramp = MIGRATION_RAMP_PRESETS.get(ramp_preset) or MIGRATION_RAMP_PRESETS["Extended (100% by Y3)"]
 
     # ── Log summary ───────────────────────────────────────────────────────
-    print(
+    _log.debug(
         f"[consumption_builder] Right-sized vCPU: {base_vcpu:,} → {azure_vcpu:,}  ({cpu_method})\n"
         f"[consumption_builder] Right-sized mem:  {base_mem:,.0f} GB → {azure_mem_gb:,.0f} GB  ({mem_method})\n"
         f"[consumption_builder] Right-sized stor: → {azure_stor_gb:,.0f} GB  ({stor_method})\n"
