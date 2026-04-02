@@ -184,8 +184,8 @@ def render():
     # ================================================================
     # Tabs: Exec Summary | Cash Flow | P&L | Fact Check
     # ================================================================
-    tab_exec, tab_cf, tab_pl, tab_fc = st.tabs([
-        "📊 Exec Summary", "💰 Cash Flow", "📋 P&L", "🔍 Fact Check"
+    tab_exec, tab_cf, tab_pl, tab_fc, tab_pres = st.tabs([
+        "📊 Exec Summary", "💰 Cash Flow", "📋 P&L", "🔍 Fact Check", "📽️ Present"
     ])
 
     # ----------------------------------------------------------------
@@ -435,3 +435,86 @@ def render():
                     use_container_width=True,
                     hide_index=True,
                 )
+
+    # ----------------------------------------------------------------
+    # TAB 5 — PRESENTATION VIEW
+    # ----------------------------------------------------------------
+    with tab_pres:
+        pb_str = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "N/A"
+
+        # Full-width title block — clean, no Step nav chrome
+        st.markdown(
+            f"<h1 style='text-align:center;margin-bottom:4px'>{client}</h1>"
+            "<p style='text-align:center;color:gray;margin-top:0'>Azure Migration — Business Case</p>",
+            unsafe_allow_html=True,
+        )
+        st.caption("Tip: press F11 for full-screen browser presentation mode.")
+        st.divider()
+
+        # Row 1 — headline KPIs
+        p1, p2, p3, p4, p5, p6 = st.columns(6)
+        p1.metric("CF NPV (10-Yr)",   f"${summary.npv_cf_10yr:,.0f}")
+        p2.metric("CF NPV (5-Yr)",    f"${summary.npv_cf_5yr:,.0f}")
+        p3.metric("P&L NPV (10-Yr)",  f"${summary.npv_10yr:,.0f}")
+        p4.metric("10-Year ROI",       f"{summary.roi_10yr:.0%}")
+        p5.metric("Payback",           pb_str)
+        p6.metric("Yr-10 Savings",     f"${summary.savings_yr10:,.0f}")
+
+        # Row 2 — cost per VM
+        v1, v2, v3, _ = st.columns([1, 1, 1, 3])
+        v1.metric("On-Prem/VM/yr",  f"${summary.on_prem_cost_per_vm_yr:,.0f}")
+        v2.metric("Azure/VM/yr",    f"${summary.azure_cost_per_vm_yr:,.0f}")
+        v3.metric("Savings/VM/yr",  f"${summary.savings_per_vm_yr:,.0f}")
+
+        st.divider()
+
+        # Dual horizon cost charts
+        st.subheader("Annual Cost — On-Prem vs Azure")
+        st.caption(
+            "Stacked bars = Azure case cost breakdown.  "
+            "Lines = total cost per scenario."
+        )
+        ch5, ch10 = st.columns(2)
+        with ch5:
+            st.markdown("##### 5-Year")
+            st.plotly_chart(_exec_chart(summary, 5), use_container_width=True)
+        with ch10:
+            st.markdown("##### 10-Year")
+            st.plotly_chart(_exec_chart(summary, 10), use_container_width=True)
+
+        st.divider()
+
+        # Cumulative savings charts
+        st.subheader("Cumulative Cash Savings")
+        cs5, cs10 = st.columns(2)
+        with cs5:
+            st.markdown("##### 5-Year")
+            st.plotly_chart(_cumulative_savings_chart(summary, 5), use_container_width=True)
+        with cs10:
+            st.markdown("##### 10-Year")
+            st.plotly_chart(_cumulative_savings_chart(summary, 10), use_container_width=True)
+
+        st.divider()
+
+        # Waterfall
+        st.subheader("Value Waterfall — Where the Savings Come From")
+        wf = summary.waterfall
+        wf_labels = list(wf.keys())
+        wf_values = list(wf.values())
+        wf_measure = ["absolute"] + ["relative"] * (len(wf_labels) - 2) + ["total"]
+        fig_wf2 = go.Figure(go.Waterfall(
+            orientation="v", measure=wf_measure,
+            x=wf_labels, y=wf_values,
+            connector={"line": {"color": "rgb(63,63,63)"}},
+            increasing={"marker": {"color": _C_AZ_LINE}},
+            decreasing={"marker": {"color": _C_SQ_LINE}},
+            totals={"marker": {"color": "#50E6FF"}},
+        ))
+        fig_wf2.update_layout(
+            xaxis_title="Category", yaxis_title="USD/yr (avg)",
+            plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        )
+        st.plotly_chart(fig_wf2, use_container_width=True)
+
+        st.divider()
+        st.page_link("pages/export_page.py", label="Go to Export — download as PowerPoint or Excel →", icon="📥")
