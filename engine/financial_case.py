@@ -305,6 +305,12 @@ def compute(
         for yr in range(1, YEARS + 1):
             existing_az[yr] = monthly * 12
 
+    # Hardware renewal factor (M12): fraction of due hardware actually purchased on the
+    # Azure migration track.  Template cell '1-Client Variables'!D27; default 10%.
+    # On the migration path, customers defer hardware refreshes, so only M12% of the
+    # normally-due acquisitions are made; retained CAPEX and depreciation scale accordingly.
+    m12 = inputs.hardware.hardware_renewal_during_migration_pct
+
     # Forward depreciation AND acquisition: slice from LOOKBACK position
     depr_servers = depreciation.servers.forward_depreciation
     depr_storage = depreciation.storage.forward_depreciation
@@ -343,13 +349,14 @@ def compute(
         fc.sq_nw_acquisition[yr] = acq_nw[yr]
 
         # --- Azure Case: retained on-prem (P&L) ---
-        fc.az_server_depreciation[yr] = depr_servers[yr] * retained_frac
+        # Depreciation scaled by M12: fewer assets are being acquired on the Azure track.
+        fc.az_server_depreciation[yr] = depr_servers[yr] * retained_frac * m12
         fc.az_server_maintenance[yr] = retained.server_maintenance[yr]
-        fc.az_storage_depreciation[yr] = depr_storage[yr] * retained_frac
+        fc.az_storage_depreciation[yr] = depr_storage[yr] * retained_frac * m12
         fc.az_storage_maintenance[yr] = retained.storage_maintenance[yr]
         fc.az_storage_backup_cost[yr] = retained.backup_storage_cost[yr]
         fc.az_storage_dr_cost[yr] = retained.dr_storage_cost[yr]
-        fc.az_nw_depreciation[yr] = depr_nw[yr] * retained_frac
+        fc.az_nw_depreciation[yr] = depr_nw[yr] * retained_frac * m12
         fc.az_nw_maintenance[yr] = retained.network_maintenance[yr]
         fc.az_bandwidth[yr] = retained.bandwidth[yr]
         fc.az_dc_space[yr] = retained.dc_lease_space[yr]
@@ -364,9 +371,11 @@ def compute(
         fc.az_system_admin[yr] = retained.system_admin_staff[yr]
 
         # --- Azure Case: cashflow CAPEX (retained hardware acquisition) ---
-        fc.az_server_acquisition[yr] = acq_servers[yr] * retained_frac
-        fc.az_storage_acquisition[yr] = acq_storage[yr] * retained_frac
-        fc.az_nw_acquisition[yr] = acq_nw[yr] * retained_frac
+        # Scale by M12: on the migration track only hardware_renewal_pct% of due
+        # acquisitions are made (deferring refreshes until migration is complete).
+        fc.az_server_acquisition[yr] = acq_servers[yr] * retained_frac * m12
+        fc.az_storage_acquisition[yr] = acq_storage[yr] * retained_frac * m12
+        fc.az_nw_acquisition[yr] = acq_nw[yr] * retained_frac * m12
 
         # --- Azure Case: Azure-only costs ---
         fc.az_azure_consumption[yr] = az_consumption[yr]

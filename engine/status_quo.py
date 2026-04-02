@@ -10,7 +10,6 @@ layer, not here.
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 
 from .models import BenchmarkConfig, BusinessCaseInputs, PriceLevel, WorkloadInventory, YesNo
@@ -242,9 +241,10 @@ def compute(inputs: BusinessCaseInputs, benchmarks: BenchmarkConfig) -> StatusQu
         costs.dr_software[yr] = total_dr_vms * benchmarks.dr_software_per_vm_yr * growth
 
         # --- OPEX: IT admin ---
-        # Excel uses ceiling (no fractional sysadmins) at Y0 growth then scales linearly.
-        # The ceiling is applied to the Y0 VM count; growth is applied to the headcount cost.
-        num_admins = math.ceil(total_vms / benchmarks.vms_per_sysadmin)
-        costs.system_admin_staff[yr] = num_admins * benchmarks.sysadmin_fully_loaded_cost_yr * growth
+        # Template: ROUND(grown_VMs / vms_per_admin, 0) × compensation per year.
+        # VM count and headcount both grow; cost does not apply a separate growth multiplier.
+        grown_vms = total_vms * growth
+        num_admins = round(grown_vms / benchmarks.vms_per_sysadmin)
+        costs.system_admin_staff[yr] = num_admins * benchmarks.sysadmin_fully_loaded_cost_yr
 
     return costs

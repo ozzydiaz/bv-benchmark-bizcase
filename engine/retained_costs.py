@@ -125,9 +125,12 @@ def compute(
             dc_fraction = 0.0 if lagged_ramp >= 1.0 else 1.0
 
         # ── Hardware maintenance — terminates when migrated ──
-        retained.server_maintenance[yr]  = status_quo.server_maintenance[yr]  * hw_fraction
-        retained.storage_maintenance[yr] = status_quo.storage_maintenance[yr] * hw_fraction
-        retained.network_maintenance[yr] = status_quo.network_maintenance[yr] * hw_fraction
+        # Template (Depreciation Schedule): retained maintenance = baseline_cost × (1-ramp).
+        # Hardware on the Azure migration track is NOT refreshed, so the maintenance base
+        # stays at the Y0 rate; only the remaining fraction changes each year.
+        retained.server_maintenance[yr]  = status_quo.server_maintenance[0]  * hw_fraction
+        retained.storage_maintenance[yr] = status_quo.storage_maintenance[0] * hw_fraction
+        retained.network_maintenance[yr] = status_quo.network_maintenance[0] * hw_fraction
 
         # ── DC facilities — 1-year lag (physical space persists through migration year) ──
         retained.dc_lease_space[yr] = status_quo.dc_lease_space[yr] * dc_fraction
