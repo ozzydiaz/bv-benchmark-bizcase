@@ -116,6 +116,7 @@ class PipelineResult:
     region: str
     workload: WorkloadInventory
     plan: ConsumptionPlan
+    storage_mode: str = "per_vm"   # "per_vm" | "aggregate" — resolved mode used for cost calc
     warnings: list[str] = field(default_factory=list)
 
     # Inventory summary helpers ─────────────────────────────────────────────
@@ -268,6 +269,7 @@ def build_business_case(
         region=region,
         workload=wl,
         plan=cp,
+        storage_mode=storage_mode,
         warnings=warnings,
     )
 

@@ -65,6 +65,14 @@ _WINDOWS_ESU_PATTERN = re.compile(
     r"windows\s+server\s+(2003|2008|2012)", re.IGNORECASE
 )
 
+# Any Windows Server OS string that includes a 4-digit year (e.g. 2016, 2019, 2022)
+# is considered "versioned".  VMs without any year in either OS column are
+# "unversioned" — VMware could not determine the exact version — and may be
+# older than 2016, so ESU exposure may be understated.
+_WINDOWS_VERSIONED_PATTERN = re.compile(
+    r"windows\s+server\s+\d{4}", re.IGNORECASE
+)
+
 MIB_TO_GB = 1 / 953.67   # MiB → GB (binary → decimal)
 MB_TO_GB = 1 / 1024.0
 
@@ -292,6 +300,12 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 bool(_WINDOWS_ESU_PATTERN.search(os_cfg))
                 or bool(_WINDOWS_ESU_PATTERN.search(os_tools))
             )
+            # Versioned = any 4-digit year present in either OS column.
+            # Unversioned = Windows Server detected but no year → may be pre-2016.
+            is_win_versioned = (
+                bool(_WINDOWS_VERSIONED_PATTERN.search(os_cfg))
+                or bool(_WINDOWS_VERSIONED_PATTERN.search(os_tools))
+            )
 
             # SQL detection: Application custom attribute (preferred) + OS fallback
             app_str = str(row[ci_app] or "").lower() if ci_app is not None else ""
@@ -314,7 +328,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 win_vcpus_all += vm_cpus
                 if is_esu:
                     win_esu_vcpus_all += vm_cpus
-                else:
+                elif not is_win_versioned:
+                    # No 4-digit year in either OS column — truly unversioned
                     win_unversioned_all += 1
             # Track whether any VM has an environment tag at all
             if env_str:
@@ -347,7 +362,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                     win_vcpus_on += vm_cpus
                     if is_esu:
                         win_esu_vcpus_on += vm_cpus
-                    else:
+                    elif not is_win_versioned:
                         win_unversioned_on += 1
 
         # Counters ready; scope resolved + inv fields assigned after vHost below.

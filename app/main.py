@@ -27,7 +27,7 @@ st.set_page_config(
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["⚡ Agent Intake", "1 · Client Intake", "2 · Consumption Plan", "3 · Benchmarks", "4 · Results", "5 · Export"],
+    ["⚡ Agent Intake", "1 · Client Intake", "2 · Consumption Plan", "3 · Benchmarks", "4 · Results", "5 · Export", "🔍 Fact Checker"],
 )
 
 if page == "⚡ Agent Intake":
@@ -48,3 +48,6 @@ elif page == "4 · Results":
 elif page == "5 · Export":
     from app.pages import export_page
     export_page.render()
+elif page == "🔍 Fact Checker":
+    from app.pages import fact_checker_page
+    fact_checker_page.render()

@@ -21,6 +21,22 @@ _CURRENCIES = ["USD", "GBP", "EUR", "CAD", "AUD", "JPY", "INR", "BRL", "MXN", "S
 
 _RAMP_OPTIONS = list(MIGRATION_RAMP_PRESETS.keys())
 
+# Human-readable labels for Azure pricing source
+_PRICING_SRC_LABEL = {
+    "api":       "Azure API",
+    "cache":     "Azure API",   # local 24-h cache
+    "benchmark": "Default",
+}
+
+# Smaller metrics via injected CSS (applied once per page render)
+_METRIC_CSS = """
+<style>
+[data-testid="stMetricValue"]  { font-size: 1.05rem !important; }
+[data-testid="stMetricLabel"]  { font-size: 0.72rem !important; }
+[data-testid="stMetricDelta"]  { font-size: 0.68rem !important; }
+</style>
+"""
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -71,7 +87,9 @@ def _inv_summary_card(result) -> None:
     d1.metric("Storage (prov.)",  f"{inv.total_disk_provisioned_gb:,.0f} GB")
     d2.metric("vCPU/pCore ratio", f"{inv.vcpu_per_core_ratio:.2f}×")
     d3.metric("Inferred Region",  result.region)
-    d4.metric("Azure Pricing src", result.pricing.source.upper())
+    src_label = _PRICING_SRC_LABEL.get(result.pricing.source, result.pricing.source.upper())
+    src_note  = "(live)" if result.pricing.source == "api" else ("✓ cached" if result.pricing.source == "cache" else "")
+    d4.metric("Azure Pricing", src_label, delta=src_note or None, delta_color="off")
     d5.metric("Warnings",         len(result.warnings) or "None")
 
     st.markdown("#### 🖥️ OS & License Profile")
@@ -155,15 +173,27 @@ def _rightsizing_card(result) -> None:
     m1.metric("Compute/yr",  _fmt(plan.annual_compute_consumption_lc_y10))
     m2.metric("Storage/yr",  _fmt(plan.annual_storage_consumption_lc_y10))
     m3.metric("Total Azure/yr", _fmt(total_az))
-    m4.metric("Pricing source", f"{result.region} / {result.pricing.source}")
-    st.caption(
-        f"Reference SKU: {result.pricing.vm_sku} at "
-        f"{result.pricing.price_per_vcpu_hour_display}  |  "
-        f"Disk: {result.pricing.disk_sku} at {result.pricing.price_per_gb_month_display}"
+    src_label = _PRICING_SRC_LABEL.get(result.pricing.source, result.pricing.source.upper())
+    m4.metric("Pricing source", f"{result.region}", delta=src_label, delta_color="off")
+
+    # Compute caption: fleet-level vCPU pricing (reference SKU gives $/vCPU-hr)
+    compute_note = (
+        f"Compute: {result.pricing.vm_sku} @ {result.pricing.price_per_vcpu_hour_display} "
+        f"× {plan.azure_vcpu:,} fleet vCPUs (fleet-level rate, not per-VM SKU match)"
     )
+    # Storage caption depends on mode
+    smode = getattr(result, "storage_mode", "aggregate")
+    if smode == "per_vm":
+        storage_note = f"Storage: per-disk tier assignment (managed disks mapped individually)"
+    else:
+        storage_note = (
+            f"Storage: fleet aggregate — {result.pricing.disk_sku} "
+            f"@ {result.pricing.price_per_gb_month_display} blended rate"
+        )
+    st.caption(f"{compute_note}  |  {storage_note}")
 
 
-def _results_kpi_preview(result) -> None:
+def _results_kpi_preview(result, horizon: int = 5) -> None:
     """Run engine and show headline KPIs."""
     from engine import status_quo, retained_costs, depreciation, financial_case, outputs
     inputs  = result.inputs
@@ -179,41 +209,68 @@ def _results_kpi_preview(result) -> None:
     pb_str = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "N/A"
     st.markdown("#### 📊 Business Case Preview")
     k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("CF NPV (10-Yr)",    _fmt(summary.npv_cf_10yr))
-    k2.metric("CF NPV (5-Yr)",     _fmt(summary.npv_cf_5yr))
-    k3.metric("P&L NPV (10-Yr)",   _fmt(summary.npv_10yr))
-    k4.metric("10-Year ROI",        f"{summary.roi_10yr:.0%}")
-    k5.metric("Payback",            pb_str)
-    k6.metric("Yr-10 Savings",      _fmt(summary.savings_yr10))
+    if horizon >= 10:
+        k1.metric("CF NPV (10-Yr)",   _fmt(summary.npv_cf_10yr))
+        k2.metric("P&L NPV (10-Yr)",  _fmt(summary.npv_10yr))
+        k3.metric("10-Year ROI",       f"{summary.roi_10yr:.0%}")
+    else:
+        k1.metric("CF NPV (5-Yr)",    _fmt(summary.npv_cf_5yr))
+        k2.metric("P&L NPV (5-Yr)",   _fmt(summary.npv_5yr))
+        k3.metric("5-Year ROI",        f"{summary.roi_5yr:.0%}")
+    k4.metric("Payback",              pb_str)
+    k5.metric("Yr-10 Savings",        _fmt(summary.savings_yr10))
+    k6.metric("10-Yr ROI",            f"{summary.roi_10yr:.0%}")
 
     v1, v2, v3, _ = st.columns([1, 1, 1, 3])
     v1.metric("On-Prem Cost/VM/yr", _fmt(summary.on_prem_cost_per_vm_yr))
     v2.metric("Azure Cost/VM/yr",   _fmt(summary.azure_cost_per_vm_yr))
     v3.metric("Savings/VM/yr",      _fmt(summary.savings_per_vm_yr))
 
-    # Quick overview chart — 5-Year
-    years5 = list(range(1, 6))
+    # Chart scoped to selected horizon
+    n = horizon
+    years = list(range(1, n + 1))
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        name="Retained CAPEX",    x=years5, y=summary.az_cf_capex_by_year[1:6],  marker_color="#4A4A6A"))
+        name="Retained CAPEX",    x=years, y=summary.az_cf_capex_by_year[1:n+1],  marker_color="#4A4A6A"))
     fig.add_trace(go.Bar(
-        name="Retained OPEX",     x=years5, y=summary.az_cf_opex_by_year[1:6],   marker_color="#C76C00"))
+        name="Retained OPEX",     x=years, y=summary.az_cf_opex_by_year[1:n+1],   marker_color="#C76C00"))
     fig.add_trace(go.Bar(
-        name="Azure Consumption", x=years5, y=summary.az_cf_azure_by_year[1:6],  marker_color="#50B0F0"))
-    mig = [v if v != 0 else None for v in summary.az_cf_migration_by_year[1:6]]
+        name="Azure Consumption", x=years, y=summary.az_cf_azure_by_year[1:n+1],  marker_color="#50B0F0"))
+    mig = [v if v != 0 else None for v in summary.az_cf_migration_by_year[1:n+1]]
     fig.add_trace(go.Bar(
-        name="Migration",         x=years5, y=mig,                               marker_color="#FFC107"))
+        name="Migration",         x=years, y=mig,                                  marker_color="#FFC107"))
     fig.add_trace(go.Scatter(
-        name="On-Prem (SQ)", x=years5, y=summary.sq_cf_by_year[1:6],
+        name="On-Prem (SQ)", x=years, y=summary.sq_cf_by_year[1:n+1],
         mode="lines+markers", line=dict(color="#FF6B35", width=3), marker=dict(size=8)))
+
+    # Average annual CF savings annotation
+    cf_savings = summary.annual_cf_savings[1:n+1]
+    avg_saving = sum(cf_savings) / n if n else 0.0
+    fig.add_hline(
+        y=avg_saving,
+        line_dash="dash",
+        line_color="#22CC88",
+        annotation_text=f"Avg {n}-yr saving: {_fmt(avg_saving)}/yr",
+        annotation_position="top right",
+        annotation_font_size=11,
+        annotation_font_color="#22CC88",
+    )
+
     fig.update_layout(
-        barmode="stack", title="5-Year Cost Comparison",
+        barmode="stack",
+        title=f"{n}-Year Cost Comparison (avg annual saving: {_fmt(avg_saving)})",
         xaxis=dict(title="Year", tickmode="linear", tick0=1, dtick=1),
         yaxis=dict(title="USD", tickformat="$,.0f"),
-        legend=dict(orientation="h"),
-        height=320,
+        legend=dict(
+            orientation="v",
+            x=1.02, xanchor="left",
+            y=1.0,  yanchor="top",
+            font=dict(size=11),
+            bgcolor="rgba(0,0,0,0)",
+        ),
+        height=360,
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
-        margin=dict(t=40, b=20),
+        margin=dict(t=50, b=20, r=170),
     )
     st.plotly_chart(fig, use_container_width=True)
 
@@ -232,6 +289,8 @@ def render() -> None:
         "infers the Azure region, fetches live PAYG pricing, right-sizes to Azure, "
         "and builds the full business case — no manual number entry required."
     )
+    # Reduce default metric font sizes for a denser layout
+    st.markdown(_METRIC_CSS, unsafe_allow_html=True)
 
     bm = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
 
@@ -295,6 +354,33 @@ def render() -> None:
         ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
         ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
 
+        st.markdown("**Storage Calculation Mode**")
+        st.caption(
+            "*Per-VM disk tiers* assigns each disk individually to the nearest Azure managed disk tier "
+            "(most accurate for fleets with mixed disk sizes). "
+            "*Fleet aggregate* applies a blended per-GB rate to the total provisioned storage "
+            "(faster, suitable for early-stage estimates)."
+        )
+        _storage_opts = ["Per-VM disk tiers (accurate)", "Fleet aggregate (fast)"]
+        _storage_sel  = st.radio(
+            "Storage mode",
+            _storage_opts,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        storage_mode = "per_vm" if "Per-VM" in _storage_sel else "aggregate"
+
+        st.markdown("**Analysis Time Horizon**")
+        _horizon_sel = st.radio(
+            "Horizon",
+            ["5-Year", "10-Year"],
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+        )
+        horizon = 5 if _horizon_sel == "5-Year" else 10
+
     # ── SUBMIT BUTTON ─────────────────────────────────────────────────────────
     btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Build Business Case"
     submit_clicked = st.button(btn_label, type="primary", use_container_width=True)
@@ -352,7 +438,9 @@ def render() -> None:
                             ecif_by_year=ecif,
                             benchmarks=bm,
                             num_datacenters_to_exit=int(dc_exit),
+                            storage_mode=storage_mode,
                         )
+                        st.session_state["_agent_horizon"]  = horizon
                         st.write(
                             f"✔ {result.inventory.num_vms:,} VMs parsed · "
                             f"region: {result.region} · pricing: {result.pricing.source}"
@@ -411,7 +499,7 @@ def render() -> None:
     st.divider()
     _rightsizing_card(result)
     st.divider()
-    _results_kpi_preview(result)
+    _results_kpi_preview(result, horizon=st.session_state.get("_agent_horizon", 5))
 
     st.divider()
     st.info(
