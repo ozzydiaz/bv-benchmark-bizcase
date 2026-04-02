@@ -48,6 +48,7 @@ def workload_inventory_from_rvtools(
     inv: RVToolsInventory,
     region: str = "",
     workload_name: str = "",
+    vcpu_ratio: float = 1.97,
 ) -> WorkloadInventory:
     """
     Map a parsed RVToolsInventory to a WorkloadInventory.
@@ -59,8 +60,15 @@ def workload_inventory_from_rvtools(
     Physical server count (num_physical_servers_excl_hosts) is set to 0
     because RVTools only exposes virtualised workloads.  The engine will
     derive estimated physical counts from the VM/server ratio benchmark.
+
+    vcpu_ratio : float
+        The vCPU-to-pCore ratio to use for pCore derivation.  The Template
+        benchmark default is 1.97.  The vHost-calculated average is available
+        in inv.vcpu_per_core_ratio for informational display.
     """
-    vcpu_ratio = inv.vcpu_per_core_ratio if inv.vcpu_per_core_ratio > 0 else 1.97
+    # Always use 1.97 by default (Template benchmark) — caller can
+    # override with the vHost-calculated value if preferred.
+    vcpu_ratio = vcpu_ratio if vcpu_ratio > 0 else 1.97
 
     return WorkloadInventory(
         workload_name=workload_name or "RVTools Import",
@@ -117,6 +125,8 @@ class PipelineResult:
     workload: WorkloadInventory
     plan: ConsumptionPlan
     storage_mode: str = "per_vm"   # "per_vm" | "aggregate" — resolved mode used for cost calc
+    vcpu_ratio_used: float = 1.97  # ratio applied for pCore derivation
+    vcpu_ratio_vhost: float = 0.0  # vHost-calculated average (0 = vHost tab absent)
     warnings: list[str] = field(default_factory=list)
 
     # Inventory summary helpers ─────────────────────────────────────────────
@@ -164,6 +174,7 @@ def build_business_case(
     ecif_by_year: list[float] | None = None,
     benchmarks: BenchmarkConfig | None = None,
     storage_mode: str = "per_vm",
+    vcpu_ratio_override: float | None = None,
     workload_name: str = "",
     num_datacenters_to_exit: int = 0,
 ) -> PipelineResult:
@@ -206,10 +217,24 @@ def build_business_case(
     if benchmarks is None:
         benchmarks = BenchmarkConfig.from_yaml()
 
+    # vCPU/pCore ratio: caller can specify; otherwise use benchmark default 1.97.
+    # The vHost-calculated average (inv.vcpu_per_core_ratio) is captured after
+    # parsing and stored in PipelineResult for informational display.
+    _benchmark_ratio = benchmarks.vcpu_to_pcores_ratio  # 1.97 from Template
+    _vhost_ratio = 0.0  # filled after parse
+    vcpu_ratio_for_wl = (
+        vcpu_ratio_override
+        if vcpu_ratio_override is not None and vcpu_ratio_override > 0
+        else _benchmark_ratio
+    )
+
     warnings: list[str] = []
 
     # 1 ── Parse RVTools
     inv = _parse_rv(rvtools_path)
+
+    # Now that inv is available, capture the vHost-calculated ratio for display
+    _vhost_ratio = inv.vcpu_per_core_ratio  # 0.0 if vHost tab absent
 
     # 2 ── Infer Azure region
     region = _guess_region(inv)
@@ -222,6 +247,7 @@ def build_business_case(
         inv,
         region=region,
         workload_name=workload_name or client_name,
+        vcpu_ratio=vcpu_ratio_for_wl,
     )
 
     # 5 ── Build ConsumptionPlan (right-sizing + Azure cost estimate)
@@ -270,6 +296,8 @@ def build_business_case(
         workload=wl,
         plan=cp,
         storage_mode=storage_mode,
+        vcpu_ratio_used=vcpu_ratio_for_wl,
+        vcpu_ratio_vhost=_vhost_ratio,
         warnings=warnings,
     )
 

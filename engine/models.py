@@ -289,7 +289,7 @@ class BenchmarkConfig(BaseModel):
 
     # Servers & Storage
     vm_to_physical_server_ratio: float = 12.0
-    vcpu_to_pcores_ratio: float = 7.0
+    vcpu_to_pcores_ratio: float = 1.97   # Template Benchmark Assumptions col K — used as default when vHost unavailable
     vmem_to_pmem_ratio: float = 1.0
     server_cost_per_core: float = 147.0
     server_cost_per_gb_memory: float = 16.503

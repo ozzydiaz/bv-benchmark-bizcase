@@ -23,9 +23,9 @@ _RAMP_OPTIONS = list(MIGRATION_RAMP_PRESETS.keys())
 
 # Human-readable labels for Azure pricing source
 _PRICING_SRC_LABEL = {
-    "api":       "Azure API",
-    "cache":     "Azure API",   # local 24-h cache
-    "benchmark": "Default",
+    "api":       "Azure Retail Prices API",
+    "cache":     "Azure Retail Prices API (cached)",
+    "benchmark": "Benchmark default (no live fetch)",
 }
 
 # Smaller metrics via injected CSS (applied once per page render)
@@ -175,6 +175,23 @@ def _rightsizing_card(result) -> None:
     m3.metric("Total Azure/yr", _fmt(total_az))
     src_label = _PRICING_SRC_LABEL.get(result.pricing.source, result.pricing.source.upper())
     m4.metric("Pricing source", f"{result.region}", delta=src_label, delta_color="off")
+
+    # Attribution banner — Azure Retail Prices API is the immutable source of truth
+    if result.pricing.source in ("api", "cache"):
+        st.info(
+            "**Pricing source: [Azure Retail Prices API](https://prices.azure.com/api/retail/prices)** — "
+            "immutable source of truth for PAYG list rates. "
+            "All \$/vCPU-hr and \$/GB-month figures are fetched live (or from a 24-h local cache) "
+            "and are never hard-coded in this tool.",
+            icon="🔗",
+        )
+    else:
+        st.warning(
+            "Live pricing unavailable — using benchmark default rates. "
+            "Re-run with internet access to fetch live rates from the "
+            "[Azure Retail Prices API](https://prices.azure.com/api/retail/prices).",
+            icon="⚠️",
+        )
 
     # Compute caption: fleet-level vCPU pricing (reference SKU gives $/vCPU-hr)
     compute_note = (
@@ -381,6 +398,29 @@ def render() -> None:
         )
         horizon = 5 if _horizon_sel == "5-Year" else 10
 
+        st.markdown("**vCPU \u2192 pCore Ratio (for license cost derivation)**")
+        _prior_vhost = st.session_state.get("_agent_vhost_ratio", 0.0)
+        _vhost_label = (
+            f"vHost-calculated ({_prior_vhost:.3f}\u00d7)"
+            if _prior_vhost > 0 else "vHost-calculated (run once to see value)"
+        )
+        st.caption(
+            "The benchmark default (1.97\u00d7) is the Template model standard. "
+            "The vHost-calculated average is derived from your RVTools vHost tab after first run."
+        )
+        _ratio_opts = ["Benchmark default (1.97\u00d7)", _vhost_label]
+        _ratio_sel = st.radio(
+            "vCPU/pCore ratio",
+            _ratio_opts,
+            index=0,
+            horizontal=True,
+            label_visibility="collapsed",
+            disabled=_prior_vhost <= 0,
+        )
+        vcpu_ratio_override: float | None = (
+            _prior_vhost if ("vHost" in _ratio_sel and _prior_vhost > 0) else None
+        )
+
     # ── SUBMIT BUTTON ─────────────────────────────────────────────────────────
     btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Build Business Case"
     submit_clicked = st.button(btn_label, type="primary", use_container_width=True)
@@ -439,7 +479,11 @@ def render() -> None:
                             benchmarks=bm,
                             num_datacenters_to_exit=int(dc_exit),
                             storage_mode=storage_mode,
+                            vcpu_ratio_override=vcpu_ratio_override,
                         )
+                        # Persist vHost ratio for next render so user can toggle to it
+                        if result.vcpu_ratio_vhost > 0:
+                            st.session_state["_agent_vhost_ratio"] = result.vcpu_ratio_vhost
                         st.session_state["_agent_horizon"]  = horizon
                         st.write(
                             f"✔ {result.inventory.num_vms:,} VMs parsed · "

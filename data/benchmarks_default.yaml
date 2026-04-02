@@ -14,8 +14,8 @@ vm_to_physical_server_ratio:
   default: 12.0
   survey_backup: 12.0
 vcpu_to_pcores_ratio:
-  default: 7.0
-  survey_backup: 7.0
+  default: 1.97
+  survey_backup: 1.97
 vmem_to_pmem_ratio:
   default: 1.0
   survey_backup: 1.0

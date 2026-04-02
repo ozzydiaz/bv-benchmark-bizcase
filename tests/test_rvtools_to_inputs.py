@@ -53,9 +53,11 @@ def test_workload_inventory_storage_uses_provisioned(result):
 def test_workload_inventory_vcpu_ratio(result):
     wl  = result.workload
     inv = result.inventory
-    # Ratio should come from vHost tab
-    assert wl.vcpu_per_core_ratio == inv.vcpu_per_core_ratio
-    assert wl.vcpu_per_core_ratio > 0
+    # Engine defaults to benchmark ratio (1.97); vHost-calculated ratio
+    # is captured separately in PipelineResult.vcpu_ratio_vhost for display.
+    assert wl.vcpu_per_core_ratio == 1.97
+    assert result.vcpu_ratio_vhost == inv.vcpu_per_core_ratio
+    assert result.vcpu_ratio_used  == 1.97
 
 
 def test_workload_inventory_windows_pcores(result):
