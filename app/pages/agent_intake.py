@@ -11,6 +11,7 @@ Optional inputs: migration horizon, ACO / ECIF credits.
 from __future__ import annotations
 
 import io
+import zipfile
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -248,11 +249,20 @@ def render() -> None:
             index=_CURRENCIES.index(st.session_state.get("_agent_currency", "USD")),
         )
 
-        uploaded = st.file_uploader(
-            "Upload RVTools Export (.xlsx) *",
-            type=["xlsx"],
-            help="Export from RVTools: File → Export → All to xlsx",
+        sensitivity_confirmed = st.checkbox(
+            "✅ I confirm this RVTools export is classified **General** sensitivity or lower "
+            "and does not contain Confidential, Restricted, or higher-sensitivity data.",
+            key="_sensitivity_cb",
         )
+
+        if sensitivity_confirmed:
+            uploaded = st.file_uploader(
+                "Upload RVTools Export (.xlsx) *",
+                type=["xlsx"],
+                help="Export from RVTools: File → Export → All to xlsx",
+            )
+        else:
+            uploaded = None
 
     # ── OPTIONAL PARAMETERS (always visible, collapsed by default) ────────────
     with st.expander("⚙️ Optional Parameters", expanded=False):
@@ -284,13 +294,21 @@ def render() -> None:
         ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
         ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
 
-    # ── PARSE BUTTON ──────────────────────────────────────────────────────────
-    parse_ready = uploaded is not None and client_name.strip()
-    if not parse_ready:
-        if not client_name.strip():
-            st.info("Enter a customer name to continue.")
-        elif uploaded is None:
-            st.info("Upload an RVTools .xlsx export to continue.")
+    # ── VALIDATION GATE ───────────────────────────────────────────────────────
+    _gate_errors: list[str] = []
+    if not client_name.strip():
+        st.error("⚠️ Customer name is required to proceed.")
+        _gate_errors.append("name")
+    if not sensitivity_confirmed:
+        st.warning(
+            "☑️ Please confirm the file sensitivity classification above "
+            "before uploading your RVTools export."
+        )
+        _gate_errors.append("sensitivity")
+    elif uploaded is None:
+        st.info("Upload an RVTools .xlsx export to continue.")
+        _gate_errors.append("file")
+    if _gate_errors:
         return
 
     btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Parse & Build Business Case"
@@ -303,6 +321,18 @@ def render() -> None:
         st.session_state["_agent_currency"]     = currency
 
         file_bytes = uploaded.read()
+
+        # Pre-check: a valid .xlsx is a ZIP archive. Encrypted / sensitivity-labelled
+        # files are OLE compound documents (not ZIP), so is_zipfile returns False.
+        if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
+            st.error(
+                "🔒 This file cannot be read — it appears to be **encrypted or "
+                "password-protected**.  \n"
+                "Encrypted files are often protected by a sensitivity label **above General**.  \n\n"
+                "To fix: open the file in Excel → **File → Info → Protect Workbook → "
+                "Encrypt with Password** → remove the password → save → re-upload."
+            )
+            return
 
         with st.spinner(f"Parsing RVTools export and building business case for {client_name}…"):
             try:
@@ -324,8 +354,18 @@ def render() -> None:
                 st.session_state["inputs"]     = result.inputs
                 st.session_state["benchmarks"] = bm
             except Exception as exc:
-                st.error(f"Pipeline failed: {exc}")
-                raise
+                try:
+                    from openpyxl.utils.exceptions import InvalidFileException as _IFE
+                except ImportError:
+                    _IFE = None
+                if isinstance(exc, zipfile.BadZipFile) or (_IFE and isinstance(exc, _IFE)):
+                    st.error(
+                        "🔒 Could not open the file — it may be **encrypted or corrupted**. "
+                        "Save an unprotected copy and re-upload."
+                    )
+                else:
+                    st.error(f"Pipeline failed: {exc}")
+                    raise
 
         st.rerun()
 
