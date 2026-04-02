@@ -73,8 +73,41 @@ _WINDOWS_VERSIONED_PATTERN = re.compile(
     r"windows\s+server\s+\d{4}", re.IGNORECASE
 )
 
-MIB_TO_GB = 1 / 953.67   # MiB → GB (binary → decimal)
+MIB_TO_GB = 1 / 953.67   # MiB → decimal GB  (for on-prem TCO storage totals only)
+MIB_TO_GIB = 1 / 1024.0  # MiB → GiB  (binary; matches Azure SKU catalog memory/disk units)
 MB_TO_GB = 1 / 1024.0
+
+
+# ---------------------------------------------------------------------------
+# Per-VM record (populated during vInfo pass; used for per-VM rightsizing)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VMRecord:
+    """
+    Lightweight per-VM record extracted from vInfo (+ disk sizes from vDisk).
+    Only powered-on, non-template VMs are included.
+    All memory/storage values are in GiB (MiB ÷ 1024) to match Azure catalog.
+    """
+    name: str
+    vcpu: int
+    memory_mib: int         # raw MiB from vInfo 'Memory' column
+    host_name: str          # vInfo 'Host' column (for vHost proxy lookup)
+    os_cfg: str
+    os_tools: str
+    app_str: str            # 'Application' custom attribute (lowercased)
+    is_windows: bool
+    is_esu: bool
+    is_sql: bool
+    # Per-disk provisioned sizes in GiB (from vDisk 'Capacity MiB' ÷ 1024).
+    # Populated in a second pass after vDisk is parsed; defaults to empty.
+    disk_sizes_gib: list[float] = field(default_factory=list)
+    # vPartition consumed GiB (sum of all partition 'Consumed MiB' ÷ 1024 for this VM)
+    # 0.0 means vPartition tab absent or no match.
+    partition_consumed_gib: float = 0.0
+    # vInfo fallback storage values (GiB), used when vDisk/vPartition absent
+    inuse_gib: float = 0.0
+    provisioned_gib: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +214,27 @@ class RVToolsInventory:
     vhost_available: bool = False           # True when vHost tab was present
     include_powered_off_applied: bool = False  # True = all-VMs TCO baseline used
 
+    # Per-VM records for rightsizing (powered-on, non-template VMs only)
+    # Populated during parse(); empty until vInfo is processed.
+    vm_records: list["VMRecord"] = field(default_factory=list)
+
+    # Per-VM utilisation maps (from vCPU / vMemory tabs)
+    # Keys are VM names; values are utilisation fractions (0–1+).
+    # 0.0 entries are not stored — absence means no telemetry.
+    vm_cpu_util: dict[str, float] = field(default_factory=dict)
+    vm_mem_util: dict[str, float] = field(default_factory=dict)
+
+    # VM → Host mapping (from vInfo 'Host' column)
+    vm_to_host: dict[str, str] = field(default_factory=dict)
+
+    # Per-host utilisation (from vHost 'CPU usage %' / 'Memory usage %')
+    # Keys are host FQDNs; values are percent (0–100).
+    host_cpu_util: dict[str, float] = field(default_factory=dict)
+    host_mem_util: dict[str, float] = field(default_factory=dict)
+
+    # Per-VM consumed storage from vPartition (GiB, sum across all partitions)
+    vm_partition_consumed_gib: dict[str, float] = field(default_factory=dict)
+
     # Metadata
     source_file: str = ""
     parse_warnings: list[str] = field(default_factory=list)
@@ -246,6 +300,9 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     sql_vcpus_all = 0; sql_vms_all = 0; sql_prod_all = 0; sql_nonprod_all = 0
     sql_env_tagged_count = 0   # SQL VMs that had any non-empty Environment value
     env_all_tagged_count  = 0  # all VMs with any non-empty Environment value
+    # Per-VM rightsizing structures (powered-on only)
+    _vm_records_on: list[VMRecord] = []
+    _vm_to_host: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # vInfo tab
@@ -268,6 +325,10 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         # Optional custom-attribute columns — silent on miss (customer-specific)
         ci_app      = _col_index(headers, "Application",  [])
         ci_env      = _col_index(headers, "Environment",  [])
+        # Per-VM rightsizing: host name + vInfo fallback storage columns
+        ci_host_vi  = _col_index(headers, "Host",             [])
+        ci_prov_mib = _col_index(headers, "Provisioned MiB",  [])
+        # 'In Use MiB' already mapped via ci_stor above
 
         for row in rows:
             if ci_name is not None and row[ci_name] is None:
@@ -365,6 +426,37 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                     elif not is_win_versioned:
                         win_unversioned_on += 1
 
+                # ── Per-VM record for rightsizing ──
+                vm_name_str = str(row[ci_name]) if ci_name is not None else ""
+                mem_mib_int = int(mem) if isinstance(mem, (int, float)) else 0
+                inuse_gib   = round(float(stor) * MIB_TO_GIB, 4) if isinstance(stor, (int, float)) else 0.0
+                prov_mib    = row[ci_prov_mib] if ci_prov_mib is not None else None
+                prov_gib    = round(float(prov_mib) * MIB_TO_GIB, 4) if isinstance(prov_mib, (int, float)) else 0.0
+                host_name   = str(row[ci_host_vi] or "") if ci_host_vi is not None else ""
+                app_str_raw = str(row[ci_app] or "").lower() if ci_app is not None else ""
+                # Detect SQL for this VM specifically
+                vm_is_sql = (
+                    "sql" in app_str_raw
+                    or "sql server" in os_cfg.lower()
+                    or "sql server" in os_tools.lower()
+                )
+                _vm_records_on.append(VMRecord(
+                    name=vm_name_str,
+                    vcpu=vm_cpus,
+                    memory_mib=mem_mib_int,
+                    host_name=host_name,
+                    os_cfg=os_cfg,
+                    os_tools=os_tools,
+                    app_str=app_str_raw,
+                    is_windows=is_win,
+                    is_esu=is_esu,
+                    is_sql=vm_is_sql,
+                    inuse_gib=inuse_gib,
+                    provisioned_gib=prov_gib,
+                ))
+                if vm_name_str and host_name:
+                    _vm_to_host[vm_name_str] = host_name
+
         # Counters ready; scope resolved + inv fields assigned after vHost below.
 
     # ------------------------------------------------------------------
@@ -382,6 +474,9 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         ci_cores = _col_index(headers2, COL_CORES, warnings)
         ci_hmem = _col_index(headers2, COL_HOST_MEMORY_MB, warnings)
         ci_vpc = _col_index(headers2, COL_VCPUS_PER_CORE, warnings)
+        # Host utilisation columns (silent miss — not always exported)
+        ci_cpu_pct = _col_index(headers2, "CPU usage %",    [])
+        ci_mem_pct = _col_index(headers2, "Memory usage %", [])
 
         # Region-evidence column indices (silent — no warning on miss)
         ci_dc     = _col_index(headers2, "Datacenter",     [])
@@ -398,10 +493,13 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         tz_names: set[str] = set()
         gmt_vals: set[str] = set()
         domain_vals: set[str] = set()
+        host_cpu_util: dict[str, float] = {}
+        host_mem_util: dict[str, float] = {}
 
         for row2 in rows2:
             if ci_host is not None and row2[ci_host] is None:
                 continue
+            host_fqdn = str(row2[ci_host]).strip() if ci_host is not None else ""
             num_hosts += 1
 
             cores = row2[ci_cores] if ci_cores is not None else None
@@ -415,6 +513,15 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             vpc = row2[ci_vpc] if ci_vpc is not None else None
             if isinstance(vpc, (int, float)) and vpc > 0:
                 vcpu_per_core_values.append(float(vpc))
+
+            # Host-level utilisation (percent integers, e.g. 4, 26)
+            if host_fqdn:
+                cpu_pct = row2[ci_cpu_pct] if ci_cpu_pct is not None else None
+                mem_pct = row2[ci_mem_pct] if ci_mem_pct is not None else None
+                if isinstance(cpu_pct, (int, float)) and cpu_pct > 0:
+                    host_cpu_util[host_fqdn] = float(cpu_pct)
+                if isinstance(mem_pct, (int, float)) and mem_pct > 0:
+                    host_mem_util[host_fqdn] = float(mem_pct)
 
             if ci_dc is not None and row2[ci_dc]:
                 dc = str(row2[ci_dc]).strip()
@@ -439,6 +546,12 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         inv.timezone_names         = sorted(tz_names)
         inv.gmt_offsets            = sorted(gmt_vals)
         inv.domain_names           = sorted(domain_vals)
+        inv.host_cpu_util          = host_cpu_util
+        inv.host_mem_util          = host_mem_util
+        if host_cpu_util:
+            _log.debug(f"[rvtools_parser] Host CPU util: {len(host_cpu_util)} hosts with data")
+        if host_mem_util:
+            _log.debug(f"[rvtools_parser] Host mem util: {len(host_mem_util)} hosts with data")
 
     # ------------------------------------------------------------------
     # Resolve TCO baseline scope and populate primary inv fields
@@ -476,6 +589,10 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     inv.total_vcpu_poweredon       = total_vcpu_on
     inv.total_vmemory_gb_poweredon = round(total_mem_mb_on * MB_TO_GB, 2)
     inv.total_storage_poweredon_gb = round(total_stor_mib_on * MIB_TO_GB, 2)
+
+    # Store per-VM records and host mapping
+    inv.vm_records  = _vm_records_on
+    inv.vm_to_host  = _vm_to_host
 
     inv.windows_vms_unknown_version  = win_unversioned
     inv.esu_count_may_be_understated = win_unversioned > 0
@@ -539,7 +656,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             delattr(inv, attr)
 
     # ------------------------------------------------------------------
-    # vCPU tab — per-VM CPU utilisation (Overall MHz / Max MHz) → P95
+    # vCPU tab — per-VM CPU utilisation (Overall MHz / Max MHz)
+    # Builds vm_cpu_util dict AND fleet P95 for summary display.
     # Powered-on VMs only; VMs with Max == 0 are skipped.
     # ------------------------------------------------------------------
     if "vCPU" in wb.sheetnames:
@@ -547,9 +665,11 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         rc = ws_cpu.iter_rows(values_only=True)
         hc = list(next(rc))
         ci_cp  = _col_index(hc, "Powerstate", [])
+        ci_vm_cpu = _col_index(hc, "VM",       [])
         ci_max = _col_index(hc, "Max",        [])
         ci_ovr = _col_index(hc, "Overall",    [])
         cpu_utils: list[float] = []
+        vm_cpu_util: dict[str, float] = {}
         for row in rc:
             if ci_cp is None:
                 break
@@ -558,34 +678,42 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             mx = row[ci_max] if ci_max is not None else None
             ov = row[ci_ovr] if ci_ovr is not None else None
             if isinstance(mx, (int, float)) and isinstance(ov, (int, float)) and mx > 0:
-                cpu_utils.append(float(ov) / float(mx))
+                util = float(ov) / float(mx)
+                cpu_utils.append(util)
+                vm_name_cpu = str(row[ci_vm_cpu]) if ci_vm_cpu is not None and row[ci_vm_cpu] else ""
+                if vm_name_cpu:
+                    vm_cpu_util[vm_name_cpu] = round(util, 4)
         if cpu_utils:
             cpu_utils.sort()
             p = min(int(len(cpu_utils) * 0.95), len(cpu_utils) - 1)
             inv.cpu_util_p95 = round(cpu_utils[p], 4)
             inv.cpu_util_p95_vm_count = len(cpu_utils)
+            inv.vm_cpu_util = vm_cpu_util
             _log.debug(
                 f"[rvtools_parser] CPU P95 utilisation: {inv.cpu_util_p95:.1%}"
                 f" ({inv.cpu_util_p95_vm_count:,} powered-on VMs)"
             )
     else:
         warnings.append(
-            "vCPU tab not found — CPU utilisation telemetry unavailable. "
-            "CPU right-sizing will use the benchmark fallback reduction factor "
-            "(default: 40%). For better accuracy re-export RVtools with the vCPU tab enabled."
+            "vCPU tab not found — per-VM CPU utilisation unavailable. "
+            "vHost CPU usage % will be used as proxy where available; "
+            "otherwise fallback factor (retain 40% vCPU) applies."
         )
 
     # ------------------------------------------------------------------
-    # vMemory tab — per-VM memory utilisation (Consumed MiB / Size MiB) → P95
+    # vMemory tab — per-VM memory utilisation (Consumed MiB / Size MiB)
+    # Builds vm_mem_util dict AND fleet P95 for summary display.
     # ------------------------------------------------------------------
     if "vMemory" in wb.sheetnames:
         ws_mem = wb["vMemory"]
         rm = ws_mem.iter_rows(values_only=True)
         hm = list(next(rm))
-        ci_mp  = _col_index(hm, "Powerstate", [])
-        ci_sz  = _col_index(hm, "Size MiB",   [])
-        ci_con = _col_index(hm, "Consumed",    [])
+        ci_mp     = _col_index(hm, "Powerstate", [])
+        ci_vm_mem = _col_index(hm, "VM",         [])
+        ci_sz     = _col_index(hm, "Size MiB",   [])
+        ci_con    = _col_index(hm, "Consumed",    [])
         mem_utils: list[float] = []
+        vm_mem_util: dict[str, float] = {}
         for row in rm:
             if ci_mp is None:
                 break
@@ -594,21 +722,26 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             sz = row[ci_sz]  if ci_sz  is not None else None
             co = row[ci_con] if ci_con is not None else None
             if isinstance(sz, (int, float)) and isinstance(co, (int, float)) and sz > 0:
-                mem_utils.append(float(co) / float(sz))
+                util = float(co) / float(sz)
+                mem_utils.append(util)
+                vm_name_mem = str(row[ci_vm_mem]) if ci_vm_mem is not None and row[ci_vm_mem] else ""
+                if vm_name_mem:
+                    vm_mem_util[vm_name_mem] = round(util, 4)
         if mem_utils:
             mem_utils.sort()
             p = min(int(len(mem_utils) * 0.95), len(mem_utils) - 1)
             inv.memory_util_p95 = round(mem_utils[p], 4)
             inv.memory_util_p95_vm_count = len(mem_utils)
+            inv.vm_mem_util = vm_mem_util
             _log.debug(
                 f"[rvtools_parser] Memory P95 utilisation: {inv.memory_util_p95:.1%}"
                 f" ({inv.memory_util_p95_vm_count:,} powered-on VMs)"
             )
     else:
         warnings.append(
-            "vMemory tab not found — memory utilisation telemetry unavailable. "
-            "Memory right-sizing will use the benchmark fallback reduction factor "
-            "(default: 20%). For better accuracy re-export RVtools with the vMemory tab enabled."
+            "vMemory tab not found — per-VM memory utilisation unavailable. "
+            "vHost Memory usage % will be used as proxy where available; "
+            "otherwise fallback factor (retain 60% memory) applies."
         )
 
     # ------------------------------------------------------------------
@@ -648,11 +781,55 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         inv.total_disk_provisioned_gb           = round(total_cap_mib_all * MIB_TO_GB, 2)
         inv.total_disk_provisioned_poweredon_gb = round(total_cap_mib_on  * MIB_TO_GB, 2)
         inv.vm_disk_sizes_gb = vm_disks
+
+        # Also populate VMRecord.disk_sizes_gib (GiB = MiB ÷ 1024)
+        # Build a lookup: vm_name → [gib, gib, ...]
+        vm_disks_gib: dict[str, list[float]] = {}
+        for vm_name, sizes_dec_gb in vm_disks.items():
+            # sizes_dec_gb was stored as MIB_TO_GB; recalculate as GiB from scratch
+            # We need raw MiB values — re-compute: GiB = dec_GB × 953.67 / 1024
+            # Simpler: store GiB directly by re-reading; but to avoid a second file pass
+            # we convert: dec_gb × (953.67 / 1024) = GiB
+            vm_disks_gib[vm_name] = [round(v * 953.67 / 1024.0, 4) for v in sizes_dec_gb]
+        for vm_rec in inv.vm_records:
+            if vm_rec.name in vm_disks_gib:
+                vm_rec.disk_sizes_gib = vm_disks_gib[vm_rec.name]
+
         _log.debug(
             f"[rvtools_parser] vDisk provisioned: all={inv.total_disk_provisioned_gb:,.0f} GB  "
             f"powered-on={inv.total_disk_provisioned_poweredon_gb:,.0f} GB  "
             f"({len(vm_disks):,} VMs, {sum(len(v) for v in vm_disks.values()):,} disks)"
         )
+
+    # ------------------------------------------------------------------
+    # vPartition tab — per-VM consumed filesystem storage (GiB)
+    # Used as storage fallback when vDisk tab is absent.
+    # ------------------------------------------------------------------
+    if "vPartition" in wb.sheetnames:
+        ws_part = wb["vPartition"]
+        rp = ws_part.iter_rows(values_only=True)
+        hp = list(next(rp))
+        ci_pvm  = _col_index(hp, "VM",           [])
+        ci_ppow = _col_index(hp, "Powerstate",   [])
+        ci_pcon = _col_index(hp, "Consumed MiB", [])
+        part_consumed: dict[str, float] = {}
+        for row in rp:
+            if ci_ppow is not None and str(row[ci_ppow] or "").lower() != "poweredon":
+                continue
+            vm_n = str(row[ci_pvm] or "") if ci_pvm is not None else ""
+            con  = row[ci_pcon] if ci_pcon is not None else None
+            if vm_n and isinstance(con, (int, float)) and con > 0:
+                part_consumed[vm_n] = part_consumed.get(vm_n, 0.0) + float(con) * MIB_TO_GIB
+        if part_consumed:
+            inv.vm_partition_consumed_gib = {k: round(v, 4) for k, v in part_consumed.items()}
+            # Populate VMRecord.partition_consumed_gib
+            for vm_rec in inv.vm_records:
+                if vm_rec.name in part_consumed:
+                    vm_rec.partition_consumed_gib = round(part_consumed[vm_rec.name], 4)
+            _log.debug(
+                f"[rvtools_parser] vPartition consumed: {len(part_consumed):,} VMs, "
+                f"total {sum(part_consumed.values()):,.0f} GiB"
+            )
 
     # ------------------------------------------------------------------
     # vMetaData tab — vCenter FQDN(s) for region inference

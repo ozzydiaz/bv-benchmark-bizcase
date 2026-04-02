@@ -25,7 +25,7 @@ from pathlib import Path
 
 from engine.rvtools_parser import RVToolsInventory, parse as _parse_rv
 from engine.region_guesser import guess as _guess_region
-from engine.azure_sku_matcher import get_pricing as _get_pricing, AzurePricing
+from engine.azure_sku_matcher import get_pricing as _get_pricing, get_vm_catalog as _get_vm_catalog, AzurePricing
 from engine.consumption_builder import build as _build_cp
 from engine.models import (
     BenchmarkConfig,
@@ -242,6 +242,13 @@ def build_business_case(
     # 3 ── Fetch Azure PAYG pricing (cached 24 h; falls back to benchmarks)
     pricing = _get_pricing(region)
 
+    # 3b ── Fetch per-VM SKU catalog with live prices (cached separately 24 h)
+    #      Falls back gracefully to reference per-vCPU rate if offline.
+    try:
+        vm_catalog = _get_vm_catalog(region)
+    except Exception:
+        vm_catalog = None
+
     # 4 ── Build WorkloadInventory
     wl = workload_inventory_from_rvtools(
         inv,
@@ -262,6 +269,7 @@ def build_business_case(
         usd_to_local=usd_to_local,
         ramp_preset=ramp_preset,
         storage_mode=storage_mode,
+        vm_catalog=vm_catalog,
     )
 
     # Apply ACO / ECIF to the plan

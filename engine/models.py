@@ -363,16 +363,34 @@ class BenchmarkConfig(BaseModel):
     perpetual_growth_rate: float = 0.03
 
     # Right-sizing parameters
-    # When RVtools utilisation telemetry is available (vCPU.Overall /
-    # vMemory.Consumed), the engine uses fleet P{utilization_percentile}
-    # × headroom factor.  When no telemetry is present, the
-    # fallback_reduction factors apply instead.
-    cpu_rightsizing_headroom_factor: float = 0.20     # 20% headroom above P95 in Azure
-    memory_rightsizing_headroom_factor: float = 0.20  # 20% headroom above P95
-    storage_rightsizing_headroom_factor: float = 1.20  # in-use × 1.20
-    cpu_rightsizing_fallback_reduction: float = 0.40   # 40% vCPU reduction without telemetry
-    memory_rightsizing_fallback_reduction: float = 0.20  # 20% memory reduction without telemetry
-    utilization_percentile: int = 95                   # P-value for utilisation analysis
+    # Per-VM rightsizing.  When a VM has utilisation telemetry (vCPU.Overall/Max
+    # or vMemory.Consumed/Size) the actual utilisation fraction is used; headroom
+    # factors are added on top.  When telemetry is absent the fallback_factors
+    # define what fraction of allocated vCPU/memory to target in Azure.
+    #
+    # Fallback hierarchy (per VM):
+    #   1. vCPU/vMemory tab — per-VM utilisation ratio
+    #   2. vHost tab — host-level CPU usage % / Memory usage % as proxy
+    #   3. No telemetry → cpu_util_fallback_factor / mem_util_fallback_factor
+    #
+    # Storage fallback hierarchy (per disk):
+    #   1. vDisk tab — Capacity MiB (provisioned) per disk
+    #   2. vPartition tab — Consumed MiB per partition, summed per VM
+    #   3. vInfo — In Use MiB per VM
+    #   4. vInfo — Provisioned MiB × (1 − storage_prov_reduction_factor)
+    cpu_rightsizing_headroom_factor: float = 0.20     # headroom added above utilised fraction
+    memory_rightsizing_headroom_factor: float = 0.20  # headroom added above utilised fraction
+    cpu_util_fallback_factor: float = 0.40            # retain 40% of vCPU when no telemetry (≡ 60% reduction)
+    mem_util_fallback_factor: float = 0.60            # retain 60% of memory when no telemetry (≡ 40% reduction)
+    storage_prov_reduction_factor: float = 0.20       # reduce Provisioned MiB by 20% when In Use absent
+    utilization_percentile: int = 95                  # P-value used when computing fleet summary stats
+
+    # Azure VM family-selection thresholds (memory GiB per vCPU)
+    # A VM is routed to E-series (memory-optimised) when its mem_gib/vcpu
+    # exceeds this threshold, and to M-series when it exceeds the M threshold.
+    # HPC/SAP/Oracle keyword detection and explicit SQL flags can also force E-series.
+    mem_per_vcpu_e_series_threshold_gib: float = 6.0   # above this → E-series
+    mem_per_vcpu_m_series_threshold_gib: float = 28.0  # above this → M-series
 
     @classmethod
     def from_yaml(cls, path: str = "data/benchmarks_default.yaml") -> "BenchmarkConfig":

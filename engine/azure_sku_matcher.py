@@ -1,18 +1,18 @@
 """
 Azure Retail Prices API client with local disk cache.
 
-Fetches PAYG pricing for a reference VM SKU and managed-disk storage in a
-given Azure region, and converts to per-unit rates for the consumption engine.
+Two modes:
 
-Reference SKU: Standard_D4s_v5  (4 vCPUs, general-purpose — Dsv5 series)
-  price_per_vcpu_hour = VM_hourly_price / 4
+1. Reference-SKU pricing (legacy, used by the benchmarks/UI pricing display):
+   Fetches PAYG price for Standard_D4s_v5 and E10 LRS disk, converts to
+   per-unit rates.  get_pricing() returns AzurePricing.
 
-Managed-disk reference: "E10" Standard SSD LRS (128 GiB tier)
-  price_per_gb_month   = disk_monthly_price / 128
-
-If the API is unreachable (offline, rate-limited) or the region/SKU is not
-found, the benchmark defaults are returned and the caller is informed via
-the AzurePricing.source field.
+2. Per-VM SKU matching (per-VM rightsizing engine):
+   Loads the static VM catalog from data/azure_vm_catalog.json (D/E/F/M
+   series specs), fetches live Linux PAYG PAYG prices for all catalog SKUs
+   in the target region, then match_sku() selects the least-cost SKU that
+   satisfies target (vcpu, memory_gib) constraints.
+   get_vm_catalog() returns list[VMSku] with live prices merged in.
 
 Cache location: .cache/azure_prices/  (relative to cwd, TTL = 24 h)
 Requires: stdlib only (urllib.request, json, pathlib, time)
@@ -46,6 +46,9 @@ _REF_VM_VCPUS = 4
 # Reference managed disk: Standard SSD LRS E10 = 128 GiB
 _REF_DISK_SKU  = "E10 LRS"        # skuName fragment for standard SSD
 _REF_DISK_GiB  = 128
+
+# Static VM catalog path (bundled with the package)
+_CATALOG_PATH = Path(__file__).parent.parent / "data" / "azure_vm_catalog.json"
 
 # Fallback benchmark rates (match BenchmarkConfig defaults)
 _DEFAULT_VCPU_RATE = 0.048   # $/vCPU/hr  (Dv5 PAYG East US average)
@@ -166,6 +169,141 @@ def benchmark_pricing(
 
 
 # ---------------------------------------------------------------------------
+# Per-VM SKU matching — VMSku and catalog functions
+# ---------------------------------------------------------------------------
+
+@dataclass
+class VMSku:
+    """One Azure VM SKU with its spec and live PAYG price."""
+    arm_sku_name: str       # e.g. "Standard_D4s_v5"
+    family: str             # "D" | "E" | "F" | "M"
+    vcpu: int
+    memory_gib: int         # as documented by Azure (GiB = MiB ÷ 1024)
+    price_per_hour_usd: float = 0.0   # Linux PAYG; 0.0 = price unavailable
+    source: str = "catalog"           # "api" | "cache" | "catalog" (no live price)
+
+
+def get_vm_catalog(
+    region: str,
+    timeout_sec: float = 15.0,
+) -> list[VMSku]:
+    """
+    Return list[VMSku] for *region* with live Linux PAYG prices merged in.
+
+    Spec data (vcpu, memory_gib, family) comes from the bundled
+    data/azure_vm_catalog.json.  Prices are fetched from the Azure Retail
+    Prices API in a single paginated call and cached per-region for 24 h.
+
+    If the API is unreachable, VMSku.price_per_hour_usd stays 0.0 and
+    VMSku.source == "catalog" (caller falls back to reference-SKU rate).
+    """
+    # Load static catalog specs
+    specs = _load_catalog_specs()
+    if not specs:
+        return []
+
+    # Probe price cache
+    cache_path = _vm_catalog_cache_path(region)
+    price_map = _read_vm_price_cache(cache_path)
+    cache_source = "cache"
+
+    if price_map is None:
+        # Fetch live prices
+        try:
+            price_map = _fetch_all_vm_prices(region, timeout_sec)
+            _write_vm_price_cache(cache_path, price_map)
+            cache_source = "api"
+        except Exception as exc:
+            _log.debug(f"[azure_sku_matcher] VM catalog price fetch failed ({exc!s}) — using 0.0 fallback")
+            price_map = {}
+            cache_source = "catalog"
+
+    skus: list[VMSku] = []
+    for s in specs:
+        arm = s["armSkuName"]
+        price = price_map.get(arm, 0.0)
+        skus.append(VMSku(
+            arm_sku_name=arm,
+            family=s["family"],
+            vcpu=s["vcpu"],
+            memory_gib=s["memory_gib"],
+            price_per_hour_usd=price,
+            source=cache_source if price > 0 else "catalog",
+        ))
+
+    priced = sum(1 for s in skus if s.price_per_hour_usd > 0)
+    _log.debug(
+        f"[azure_sku_matcher] VM catalog: {len(skus)} SKUs, {priced} priced "
+        f"(region={region}, source={cache_source})"
+    )
+    return skus
+
+
+def match_sku(
+    target_vcpu: int,
+    target_mem_gib: float,
+    catalog: list[VMSku],
+    preferred_family: str = "D",
+    fallback_ref_price_per_hour: float = 0.0,
+) -> VMSku:
+    """
+    Return the least-cost Azure SKU satisfying target_vcpu and target_mem_gib.
+
+    Selection logic:
+      1. Filter catalog to SKUs in preferred_family where
+         sku.vcpu >= target_vcpu AND sku.memory_gib >= target_mem_gib.
+      2. Sort filtered candidates by price_per_hour_usd ascending; pick cheapest.
+      3. If preferred_family has no valid match, fall back through D→E→M in order.
+      4. If no priced SKU found anywhere, return a synthetic VMSku with
+         fallback_ref_price_per_hour (avoids crashing; caller emits warning).
+
+    Least-cost prefers the SKU with the fewest resources that still covers the
+    target — Azure SKUs are sorted by vcpu/memory so cheapest ≈ tightest fit.
+    """
+    families_to_try = _family_fallback_order(preferred_family)
+
+    for family in families_to_try:
+        candidates = [
+            s for s in catalog
+            if s.family == family
+            and s.vcpu >= target_vcpu
+            and s.memory_gib >= target_mem_gib
+            and s.price_per_hour_usd > 0
+        ]
+        if candidates:
+            return min(candidates, key=lambda s: s.price_per_hour_usd)
+
+    # No priced match anywhere — try any family ignoring price == 0
+    unpriced = [
+        s for s in catalog
+        if s.vcpu >= target_vcpu and s.memory_gib >= target_mem_gib
+    ]
+    if unpriced:
+        best = min(unpriced, key=lambda s: (s.vcpu, s.memory_gib))
+        # Use fallback rate if available
+        best.price_per_hour_usd = fallback_ref_price_per_hour
+        best.source = "fallback"
+        return best
+
+    # Absolute fallback: synthesise a D4s_v5 equivalent
+    return VMSku(
+        arm_sku_name="Standard_D4s_v5",
+        family="D",
+        vcpu=max(target_vcpu, 4),
+        memory_gib=max(int(target_mem_gib), 16),
+        price_per_hour_usd=fallback_ref_price_per_hour,
+        source="fallback",
+    )
+
+
+def _family_fallback_order(preferred: str) -> list[str]:
+    """Return families to try in order, starting with preferred."""
+    all_families = ["D", "E", "F", "M"]
+    order = [preferred] + [f for f in all_families if f != preferred]
+    return order
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -173,6 +311,96 @@ def _api_get(url: str, timeout_sec: float) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout_sec) as resp:
         return json.loads(resp.read().decode())
+
+
+def _load_catalog_specs() -> list[dict]:
+    """Load VM specs from the bundled JSON catalog."""
+    try:
+        data = json.loads(_CATALOG_PATH.read_text())
+        return data.get("skus", [])
+    except Exception as exc:
+        _log.debug(f"[azure_sku_matcher] Failed to load VM catalog: {exc!s}")
+        return []
+
+
+def _fetch_all_vm_prices(region: str, timeout: float) -> dict[str, float]:
+    """
+    Fetch Linux PAYG prices for all catalog SKUs in *region*.
+    Returns {armSkuName: price_per_hour_usd}.
+    Uses pagination to retrieve all results.
+    """
+    specs = _load_catalog_specs()
+    arm_names = {s["armSkuName"] for s in specs}
+
+    # The API supports up to ~100 SKU names in an 'in' filter, but we use
+    # repeated calls by family prefix to stay within URL length limits.
+    # Filter: Linux PAYG Consumption, no Spot/Low Priority.
+    price_map: dict[str, float] = {}
+
+    for family_prefix in ["Standard_D", "Standard_E", "Standard_F", "Standard_M"]:
+        url = (
+            f"{_PRICES_API}?{_API_VERSION}"
+            f"&$filter={urllib.parse.quote(_vm_price_filter(region, family_prefix))}"
+        )
+        while url:
+            try:
+                data = _api_get(url, timeout)
+            except Exception as exc:
+                _log.debug(f"[azure_sku_matcher] Price fetch error for {family_prefix}: {exc!s}")
+                break
+            for item in data.get("Items", []):
+                arm = item.get("armSkuName", "")
+                price = item.get("retailPrice", 0)
+                # Only record if this SKU is in our catalog and not Spot/LowPri
+                sku_name = item.get("skuName", "")
+                if (
+                    arm in arm_names
+                    and "Spot" not in sku_name
+                    and "Low Priority" not in sku_name
+                    and isinstance(price, (int, float))
+                    and price > 0
+                    and arm not in price_map   # keep first (cheapest if duplicates)
+                ):
+                    price_map[arm] = round(float(price), 6)
+            url = data.get("NextPageLink")  # type: ignore[assignment]
+
+    _log.debug(f"[azure_sku_matcher] Fetched {len(price_map)} VM prices for {region}")
+    return price_map
+
+
+def _vm_price_filter(region: str, family_prefix: str) -> str:
+    return (
+        f"serviceName eq 'Virtual Machines' "
+        f"and armRegionName eq '{region}' "
+        f"and priceType eq 'Consumption' "
+        f"and contains(productName, 'Linux') "
+        f"and startswith(armSkuName, '{family_prefix}')"
+    )
+
+
+def _vm_catalog_cache_path(region: str) -> Path:
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r"[^a-z0-9_-]", "_", region.lower())
+    return _CACHE_DIR / f"vm_catalog_{safe}.json"
+
+
+def _read_vm_price_cache(path: Path) -> dict[str, float] | None:
+    if not path.exists():
+        return None
+    age = time.time() - path.stat().st_mtime
+    if age > _CACHE_TTL_SEC:
+        return None
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _write_vm_price_cache(path: Path, price_map: dict[str, float]) -> None:
+    try:
+        path.write_text(json.dumps(price_map))
+    except Exception as exc:
+        _log.debug(f"[azure_sku_matcher] Failed to write VM price cache: {exc!s}")
 
 
 def _fetch_vm_rate(region: str, timeout: float) -> tuple[float, str]:

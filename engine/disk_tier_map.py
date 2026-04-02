@@ -111,29 +111,85 @@ def monthly_cost_usd(size_gib: float, disk_type: str = "standard_ssd") -> tuple[
     return tier, tier.price_per_month_usd
 
 
+# Premium SSD v2 — per-GiB capacity pricing (baseline provisioning, no IOPS/throughput).
+# East US LRS list price as of Q1 2026.  Override via assign_cheapest() pv2_price param.
+_PREMIUM_SSD_V2_PRICE_PER_GIB_MONTH: float = 0.17   # $/GiB/month
+
+
+def assign_cheapest(
+    size_gib: float,
+    pv2_price_per_gib_month: float = _PREMIUM_SSD_V2_PRICE_PER_GIB_MONTH,
+) -> tuple[str, float]:
+    """
+    Return (label, monthly_cost_usd) for the least-cost managed disk option
+    covering *size_gib* GiB, comparing Premium SSD (P-series tiers) vs
+    Premium SSD v2 (raw capacity × per-GiB rate).
+
+    Premium SSD v2 is billed on provisioned capacity at a flat per-GiB rate
+    (no fixed tier steps), so it favours odd/large sizes where P-tier rounds
+    up significantly.
+
+    Parameters
+    ----------
+    size_gib : float
+        Provisioned disk size in GiB.
+    pv2_price_per_gib_month : float
+        Premium SSD v2 per-GiB/month rate.  Override with region-specific
+        rate when available.
+
+    Returns
+    -------
+    label : str
+        Selected option: P-tier SKU name (e.g. "P10 LRS") or "Premium_SSDv2".
+    monthly_cost_usd : float
+        Monthly cost for that option.
+    """
+    p_tier, p_cost = monthly_cost_usd(size_gib, "premium_ssd")
+    pv2_cost = max(size_gib, 1.0) * pv2_price_per_gib_month
+    if pv2_cost < p_cost:
+        return "Premium_SSDv2", round(pv2_cost, 6)
+    return p_tier.sku, round(p_cost, 6)
+
+
+def vm_annual_storage_cost_usd(
+    disk_sizes_gib: list[float],
+    pv2_price_per_gib_month: float = _PREMIUM_SSD_V2_PRICE_PER_GIB_MONTH,
+) -> tuple[float, list[str]]:
+    """
+    Return (annual_cost_usd, [tier_labels]) for one VM's list of disk sizes.
+    Each disk independently picks the cheaper of P-tier vs Premium SSD v2.
+    disk_sizes_gib values are GiB (MiB ÷ 1024).
+    """
+    annual = 0.0
+    labels: list[str] = []
+    for size in disk_sizes_gib:
+        label, monthly = assign_cheapest(size, pv2_price_per_gib_month)
+        annual += monthly * 12
+        labels.append(label)
+    return round(annual, 4), labels
+
+
 def fleet_annual_cost_usd(
     vm_disk_sizes_gb: dict[str, list[float]],
     disk_type: str = "standard_ssd",
 ) -> tuple[float, dict[str, int], float]:
     """
     Compute fleet-total annual managed disk cost using per-disk tier assignment.
+    Legacy aggregate mode — used when vDisk tab is absent.
 
     Parameters
     ----------
     vm_disk_sizes_gb : dict[str, list[float]]
-        Mapping of VM name → list of provisioned disk sizes in GiB.
-        From RVToolsInventory.vm_disk_sizes_gb.
+        Mapping of VM name → list of provisioned disk sizes (decimal GB, not GiB).
+        From RVToolsInventory.vm_disk_sizes_gb (legacy field).
     disk_type : str
         "standard_ssd" or "premium_ssd".
 
     Returns
     -------
     annual_cost_usd : float
-        Total annual cost across all VMs and all disks.
     tier_counts : dict[str, int]
-        {tier_sku: count} showing the distribution of assigned tiers.
     total_provisioned_gib : float
-        Sum of all disk sizes (before tier rounding).
     """
     annual_cost = 0.0
     tier_counts: dict[str, int] = {}

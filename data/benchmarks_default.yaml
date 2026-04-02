@@ -165,24 +165,40 @@ perpetual_growth_rate:
   survey_backup: 0.03
 
 # Right-sizing parameters
-# When RVtools utilisation telemetry is available (vCPU.Overall / vMemory.Consumed),
-# the engine uses the fleet P-value (default P95) x headroom factor to right-size.
-# When no telemetry is present, the fallback_reduction factors apply instead.
+# Per-VM rightsizing hierarchy (CPU and memory):
+#   1. vCPU / vMemory tab — per-VM utilisation ratio (Overall/Max or Consumed/Size)
+#   2. vHost tab — host CPU usage % / Memory usage % as proxy for all VMs on that host
+#   3. No telemetry → cpu_util_fallback_factor / mem_util_fallback_factor applied
+# Headroom factors are added on top of the utilised fraction in all cases.
+#
+# Storage hierarchy per VM:
+#   1. vDisk tab — Capacity MiB per disk (provisioned, most accurate for tier assignment)
+#   2. vPartition tab — Consumed MiB per partition, summed per VM
+#   3. vInfo — In Use MiB
+#   4. vInfo — Provisioned MiB × (1 - storage_prov_reduction_factor)
 cpu_rightsizing_headroom_factor:
   default: 0.20
   survey_backup: 0.20
 memory_rightsizing_headroom_factor:
   default: 0.20
   survey_backup: 0.20
-storage_rightsizing_headroom_factor:
-  default: 1.20
-  survey_backup: 1.20
-cpu_rightsizing_fallback_reduction:
+cpu_util_fallback_factor:
   default: 0.40
   survey_backup: 0.40
-memory_rightsizing_fallback_reduction:
+mem_util_fallback_factor:
+  default: 0.60
+  survey_backup: 0.60
+storage_prov_reduction_factor:
   default: 0.20
   survey_backup: 0.20
 utilization_percentile:
   default: 95
   survey_backup: 95
+# Azure VM family-selection thresholds (memory GiB per vCPU).
+# Routed to E-series above e_threshold, M-series above m_threshold.
+mem_per_vcpu_e_series_threshold_gib:
+  default: 6.0
+  survey_backup: 6.0
+mem_per_vcpu_m_series_threshold_gib:
+  default: 28.0
+  survey_backup: 28.0
