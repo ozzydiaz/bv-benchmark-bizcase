@@ -84,7 +84,14 @@ def _inv_summary_card(result) -> None:
     src_badge = "🔍 detected" if sql["source"] == "application" else "📐 estimated (10% default)"
     e3.metric("SQL Server pCores", f"{sql['pcores']:,}", delta=f"{sql['detected']} VMs — {src_badge}", delta_color="off")
     e4.metric("SQL ESU pCores",   f"{sql['esu_pcores']:,}")
-    e5.metric("SQL Prod / Non-Prod", f"{sql['prod']} / {sql['nonprod']}")
+
+    if sql["prod_assumed"]:
+        prod_label  = f"{sql['prod']} (all prod, assumed)"
+        prod_delta  = "no Environment tags — all assumed Production"
+    else:
+        prod_label  = f"{sql['prod']} Prod / {sql['nonprod']} Non-Prod"
+        prod_delta  = "from Environment tags"
+    e5.metric("SQL Prod / Non-Prod", prod_label, delta=prod_delta, delta_color="off")
 
     if inv.esu_count_may_be_understated:
         st.warning(
@@ -92,6 +99,17 @@ def _inv_summary_card(result) -> None:
             f"have no detectable OS version string (typically pre-2016). "
             f"ESU pCore count may be understated. Override in Step 3 · Benchmarks if you have a separate OS audit."
         )
+
+    if sql["prod_assumed"]:
+        st.info(
+            f"🟡 **Production assumed** — no Environment tags found in this inventory. "
+            f"All {inv.pcores_with_windows_server:,} Windows Server pCores and "
+            f"all {sql['detected']} SQL Server VMs are treated as **Production** for licensing cost purposes. "
+            f"If this estate includes Dev/Test workloads, tag the VMs in RVTools (Environment = \"Dev\" / \"Test\") "
+            f"and re-upload to recalculate with a split."
+        )
+    elif not sql["env_tagging"]:
+        pass  # no Windows/SQL VMs so nothing to note
 
     if sql["source"] == "default":
         st.info(

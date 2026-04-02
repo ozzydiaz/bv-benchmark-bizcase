@@ -97,7 +97,7 @@ The app opens at **http://localhost:8501** in your browser.
 
 The engine runs automatically. You will see:
 - Parsed inventory summary (VMs, hosts, vCPUs, memory, storage)
-- OS and license profile (Windows, ESU, SQL with Prod/non-Prod split)
+- OS and license profile (Windows, ESU, SQL with Prod/Non-Prod classification — Production assumed when no environment tags present)
 - Azure right-sizing (P95 utilisation-based or fallback)
 - Business case KPI preview + 5-Year cost comparison chart
 
@@ -179,6 +179,7 @@ All other sheets are ignored.
 | Azure pricing shows "benchmark" source | API unreachable or rate-limited — results are still valid using benchmark defaults |
 | ESU pCores show ⚠ warning | RVTools OS column lacks version strings for some Windows VMs. Override the ESU pCore count in Step 3 · Benchmarks if you have a separate OS audit. |
 | SQL count shows "estimated (10% default)" | No `Application` custom attribute data in the RVTools export. Override SQL pCores in Step 3 · Benchmarks. |
+| SQL shows "assumed production — no env tags" | No `Environment` tags found in the inventory. **All Windows Server and SQL VMs are treated as Production by default.** This is the correct assumption when tagging is absent. If the estate includes Dev/Test workloads, tag VMs in vCenter (Environment = "Dev" / "Test"), re-export RVTools, and re-upload. |
 | PowerPoint charts are text placeholders | Install `kaleido`: `pip install kaleido` then re-export |
 | Excel export opens without macros | By design — openpyxl strips VBA. Use as a data reference; re-run macros in the original template if needed. |
 | `Template not found` on Excel export | Place `Template_BV Benchmark Business Case v6.xlsm` in the project root |

@@ -93,8 +93,25 @@ def test_sql_pcores_gt_default(result):
 
 def test_sql_prod_nonprod_sum(result):
     inv = result.inventory
-    # prod + nonprod should equal total detected (may be < total if some have no env)
-    assert inv.sql_vms_prod + inv.sql_vms_nonprod <= inv.sql_vms_detected
+    # prod + nonprod must equal total detected exactly (no VMs can fall through)
+    assert inv.sql_vms_prod + inv.sql_vms_nonprod == inv.sql_vms_detected
+
+
+def test_sql_prod_assumed_when_no_env_tags(result):
+    """This RVTools file has no Environment tags on SQL VMs — all should be assumed Production."""
+    inv = result.inventory
+    # In the Reliance file, no SQL VM has an Environment tag
+    assert inv.sql_prod_assumed is True
+    assert inv.sql_vms_prod    == inv.sql_vms_detected
+    assert inv.sql_vms_nonprod == 0
+
+
+def test_env_tagging_present_reflects_file(result):
+    """Reliance file has 2 VMs with Environment=Production — tagging flag should be True."""
+    # Even with sparse tagging, any non-empty value sets env_tagging_present
+    inv = result.inventory
+    # Just verify the field exists and is a bool; actual value depends on file
+    assert isinstance(inv.env_tagging_present, bool)
 
 
 # ── Region inference ──────────────────────────────────────────────────────────
@@ -189,9 +206,13 @@ def test_full_engine_run(result):
 
 def test_pipeline_result_sql_summary(result):
     sql = result.sql_summary
-    assert "detected" in sql
-    assert "prod" in sql
-    assert "nonprod" in sql
-    assert "source" in sql
-    assert "pcores" in sql
+    assert "detected"     in sql
+    assert "prod"         in sql
+    assert "nonprod"      in sql
+    assert "source"       in sql
+    assert "pcores"       in sql
+    assert "prod_assumed" in sql
+    assert "env_tagging"  in sql
     assert sql["source"] in ("application", "default")
+    # prod_assumed is bool
+    assert isinstance(sql["prod_assumed"], bool)

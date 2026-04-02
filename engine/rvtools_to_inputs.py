@@ -124,12 +124,14 @@ class PipelineResult:
         """SQL detection summary for presentation display."""
         inv = self.inventory
         return {
-            "detected": inv.sql_vms_detected,
-            "prod": inv.sql_vms_prod,
-            "nonprod": inv.sql_vms_nonprod,
-            "source": inv.sql_detection_source,
-            "pcores": inv.pcores_with_sql_server,
-            "esu_pcores": inv.pcores_with_sql_esu,
+            "detected":          inv.sql_vms_detected,
+            "prod":              inv.sql_vms_prod,
+            "nonprod":           inv.sql_vms_nonprod,
+            "source":            inv.sql_detection_source,
+            "pcores":            inv.pcores_with_sql_server,
+            "esu_pcores":        inv.pcores_with_sql_esu,
+            "prod_assumed":      inv.sql_prod_assumed,
+            "env_tagging":       inv.env_tagging_present,
         }
 
     @property

@@ -39,6 +39,17 @@ COL_VCPUS_PER_CORE = "vCPUs per Core"
 # OS filter patterns for Windows Server
 _WINDOWS_PATTERN = re.compile(r"windows\s+server", re.IGNORECASE)
 
+# Environment tags that explicitly indicate non-production workloads.
+# Any SQL/Windows VM whose Environment column contains one of these
+# keywords is classified as non-production.  All other VMs — including
+# those with an empty, unknown, or "production" environment tag — are
+# classified as production.  This implements the default assumption:
+# "if no tagging, assume production."
+_ENV_NONPROD_PATTERN = re.compile(
+    r"\b(dev|development|test|testing|uat|qa|staging|sandbox|non.?prod)\b",
+    re.IGNORECASE,
+)
+
 # ESU-eligible OS versions: 2003, 2008 (inc R2), and 2012 (inc R2).
 # Windows Server 2012/2012 R2 reached end of standard support Oct 2023 and
 # became ESU-eligible.  2003/2008/2008 R2 have been ESU for longer.
@@ -107,11 +118,19 @@ class RVToolsInventory:
 
     # SQL detection from Application custom attribute (col 77 in vInfo).
     # When sql_vms_detected > 0 it overrides the 10% Windows default above.
-    # Prod/non-Prod split is informational (for presentation); not used in TCO math.
+    # Prod/Non-Prod split is informational (for presentation); not used in TCO math.
+    #
+    # Default assumption: if a VM has no environment tag (or an unrecognised tag),
+    # it is classified as Production.  Only explicit non-production tags
+    # (dev/test/uat/staging/sandbox/non-prod) override this to Non-Production.
     sql_vms_detected: int = 0             # VMs with 'sql' in Application or OS
-    sql_vms_prod: int = 0                 # subset where Environment == 'Production'
-    sql_vms_nonprod: int = 0              # remainder
+    sql_vms_prod: int = 0                 # Production (explicit tag or assumed)
+    sql_vms_nonprod: int = 0              # Non-Production (explicit non-prod tag only)
+    sql_prod_assumed: bool = False        # True when no SQL VM had any env tag
     sql_detection_source: str = "default"  # 'application' | 'default'
+
+    # Environment tagging coverage
+    env_tagging_present: bool = False     # True if ≥1 VM has any non-empty Environment tag
 
     # ── AZURE MIGRATION TARGET (powered-on VMs only) ──
     num_vms_poweredon: int = 0
@@ -214,6 +233,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     vhost_found = False
     # SQL-from-Application tracking (all-VM scope, silent columns)
     sql_vcpus_all = 0; sql_vms_all = 0; sql_prod_all = 0; sql_nonprod_all = 0
+    sql_env_tagged_count = 0   # SQL VMs that had any non-empty Environment value
+    env_all_tagged_count  = 0  # all VMs with any non-empty Environment value
 
     # ------------------------------------------------------------------
     # vInfo tab
@@ -292,13 +313,23 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                     win_esu_vcpus_all += vm_cpus
                 else:
                     win_unversioned_all += 1
+            # Track whether any VM has an environment tag at all
+            if env_str:
+                env_all_tagged_count += 1
+
             if is_sql:
                 sql_vcpus_all += vm_cpus
                 sql_vms_all += 1
-                if "production" in env_str:
-                    sql_prod_all += 1
+                if env_str:
+                    sql_env_tagged_count += 1
+                    # Explicit non-prod tag → non-production; everything else → production
+                    if _ENV_NONPROD_PATTERN.search(env_str):
+                        sql_nonprod_all += 1
+                    else:
+                        sql_prod_all += 1
                 else:
-                    sql_nonprod_all += 1
+                    # No environment tag — default assumption: production
+                    sql_prod_all += 1
 
             # ── Powered-on accumulators ──
             if is_on:
@@ -462,9 +493,11 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     inv.pcores_with_windows_esu = round(win_esu_vcpus / ratio)
 
     # SQL pCores: prefer Application-detected count; fall back to 10% of Windows
-    inv.sql_vms_detected = sql_vms_all
-    inv.sql_vms_prod     = sql_prod_all
-    inv.sql_vms_nonprod  = sql_nonprod_all
+    inv.sql_vms_detected     = sql_vms_all
+    inv.sql_vms_prod         = sql_prod_all
+    inv.sql_vms_nonprod      = sql_nonprod_all
+    inv.sql_prod_assumed     = (sql_vms_all > 0 and sql_env_tagged_count == 0)
+    inv.env_tagging_present  = env_all_tagged_count > 0
     if sql_vcpus_all > 0:
         inv.pcores_with_sql_server = round(sql_vcpus_all / ratio)
         inv.sql_detection_source   = "application"
@@ -472,10 +505,10 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         win_pcore_total = max(inv.pcores_with_windows_server, 1)
         sql_esu_fraction = inv.pcores_with_windows_esu / win_pcore_total
         inv.pcores_with_sql_esu = round(inv.pcores_with_sql_server * sql_esu_fraction)
+        prod_note = "assumed prod — no env tags" if inv.sql_prod_assumed else f"{sql_prod_all} Prod / {sql_nonprod_all} non-Prod"
         print(
             f"[rvtools_parser] SQL detection (Application): "
-            f"{sql_vms_all} VMs → {inv.pcores_with_sql_server} pCores  "
-            f"({sql_prod_all} Prod / {sql_nonprod_all} non-Prod declared)"
+            f"{sql_vms_all} VMs → {inv.pcores_with_sql_server} pCores  ({prod_note})"
         )
     else:
         inv.pcores_with_sql_server = round(inv.pcores_with_windows_server * 0.10)
