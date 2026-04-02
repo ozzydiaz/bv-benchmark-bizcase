@@ -263,6 +263,7 @@ def render() -> None:
             )
         else:
             uploaded = None
+            st.caption("☑️ Check the box above to enable file upload.")
 
     # ── OPTIONAL PARAMETERS (always visible, collapsed by default) ────────────
     with st.expander("⚙️ Optional Parameters", expanded=False):
@@ -294,80 +295,97 @@ def render() -> None:
         ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
         ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
 
-    # ── VALIDATION GATE ───────────────────────────────────────────────────────
-    _gate_errors: list[str] = []
-    if not client_name.strip():
-        st.error("⚠️ Customer name is required to proceed.")
-        _gate_errors.append("name")
-    if not sensitivity_confirmed:
-        st.warning(
-            "☑️ Please confirm the file sensitivity classification above "
-            "before uploading your RVTools export."
-        )
-        _gate_errors.append("sensitivity")
-    elif uploaded is None:
-        st.info("Upload an RVTools .xlsx export to continue.")
-        _gate_errors.append("file")
-    if _gate_errors:
-        return
+    # ── SUBMIT BUTTON ─────────────────────────────────────────────────────────
+    btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Build Business Case"
+    submit_clicked = st.button(btn_label, type="primary", use_container_width=True)
 
-    btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Parse & Build Business Case"
-    if st.button(btn_label, type="primary", use_container_width=True):
-        # Clear any previous result
-        for key in ["_agent_result", "inputs", "_agent_summary"]:
-            st.session_state.pop(key, None)
+    if submit_clicked:
+        # Validate only on submit — never show errors on first page load
+        _errors: list[str] = []
+        if not client_name.strip():
+            st.error("⚠️ Customer name is required.")
+            _errors.append("name")
+        if not sensitivity_confirmed:
+            st.error("⚠️ Please confirm the file sensitivity classification above before proceeding.")
+            _errors.append("sensitivity")
+        elif uploaded is None:
+            st.error("⚠️ Please upload an RVTools .xlsx export.")
+            _errors.append("file")
 
-        st.session_state["_agent_client_name"] = client_name.strip()
-        st.session_state["_agent_currency"]     = currency
+        if not _errors:
+            for key in ["_agent_result", "inputs", "_agent_summary"]:
+                st.session_state.pop(key, None)
 
-        file_bytes = uploaded.read()
+            st.session_state["_agent_client_name"] = client_name.strip()
+            st.session_state["_agent_currency"]     = currency
 
-        # Pre-check: a valid .xlsx is a ZIP archive. Encrypted / sensitivity-labelled
-        # files are OLE compound documents (not ZIP), so is_zipfile returns False.
-        if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
-            st.error(
-                "🔒 This file cannot be read — it appears to be **encrypted or "
-                "password-protected**.  \n"
-                "Encrypted files are often protected by a sensitivity label **above General**.  \n\n"
-                "To fix: open the file in Excel → **File → Info → Protect Workbook → "
-                "Encrypt with Password** → remove the password → save → re-upload."
-            )
-            return
+            file_bytes = uploaded.read()
+            _pipeline_ok = False
 
-        with st.spinner(f"Parsing RVTools export and building business case for {client_name}…"):
-            try:
-                from engine.rvtools_to_inputs import build_business_case_from_bytes
-                aco  = [aco_y1, aco_y2, aco_y3,  0, 0, 0, 0, 0, 0, 0]
-                ecif = [ecif_y1, ecif_y2, 0,      0, 0, 0, 0, 0, 0, 0]
-                result = build_business_case_from_bytes(
-                    file_bytes=file_bytes,
-                    client_name=client_name.strip(),
-                    currency=currency,
-                    ramp_preset=ramp_preset,
-                    aco_by_year=aco,
-                    ecif_by_year=ecif,
-                    benchmarks=bm,
-                    num_datacenters_to_exit=int(dc_exit),
-                )
-                st.session_state["_agent_result"] = result
-                # Populate session state used by Steps 4 & 5
-                st.session_state["inputs"]     = result.inputs
-                st.session_state["benchmarks"] = bm
-            except Exception as exc:
-                try:
-                    from openpyxl.utils.exceptions import InvalidFileException as _IFE
-                except ImportError:
-                    _IFE = None
-                if isinstance(exc, zipfile.BadZipFile) or (_IFE and isinstance(exc, _IFE)):
+            with st.status("⚡ Building your business case…", expanded=True) as _status:
+                st.write("🔍 Step 1 — Validating file format…")
+
+                if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
+                    _status.update(label="❌ File could not be read", state="error", expanded=True)
                     st.error(
-                        "🔒 Could not open the file — it may be **encrypted or corrupted**. "
-                        "Save an unprotected copy and re-upload."
+                        "🔒 This file cannot be read — it appears to be **encrypted or "
+                        "password-protected**.  \n"
+                        "Encrypted files are often protected by a sensitivity label **above General**.  \n\n"
+                        "To fix: open the file in Excel → **File → Info → Protect Workbook → "
+                        "Encrypt with Password** → remove the password → save → re-upload."
                     )
                 else:
-                    st.error(f"Pipeline failed: {exc}")
-                    raise
+                    st.write(
+                        "📊 Step 2 — Parsing inventory · inferring Azure region · "
+                        "fetching live pricing · right-sizing · building financial model…"
+                    )
+                    try:
+                        from engine.rvtools_to_inputs import build_business_case_from_bytes
+                        aco  = [aco_y1, aco_y2, aco_y3,  0, 0, 0, 0, 0, 0, 0]
+                        ecif = [ecif_y1, ecif_y2, 0,      0, 0, 0, 0, 0, 0, 0]
+                        result = build_business_case_from_bytes(
+                            file_bytes=file_bytes,
+                            client_name=client_name.strip(),
+                            currency=currency,
+                            ramp_preset=ramp_preset,
+                            aco_by_year=aco,
+                            ecif_by_year=ecif,
+                            benchmarks=bm,
+                            num_datacenters_to_exit=int(dc_exit),
+                        )
+                        st.write(
+                            f"✔ {result.inventory.num_vms:,} VMs parsed · "
+                            f"region: {result.region} · pricing: {result.pricing.source}"
+                        )
+                        st.session_state["_agent_result"] = result
+                        st.session_state["inputs"]        = result.inputs
+                        st.session_state["benchmarks"]    = bm
+                        _pipeline_ok = True
+                        _status.update(
+                            label=(
+                                f"✅ Business case ready — "
+                                f"{result.inventory.num_vms:,} VMs · {result.region}"
+                            ),
+                            state="complete",
+                            expanded=False,
+                        )
+                    except Exception as exc:
+                        try:
+                            from openpyxl.utils.exceptions import InvalidFileException as _IFE
+                        except ImportError:
+                            _IFE = None
+                        _status.update(label="❌ Pipeline failed", state="error", expanded=True)
+                        if isinstance(exc, zipfile.BadZipFile) or (_IFE and isinstance(exc, _IFE)):
+                            st.error(
+                                "🔒 Could not open the file — it may be **encrypted or corrupted**. "
+                                "Save an unprotected copy and re-upload."
+                            )
+                        else:
+                            st.error(f"Pipeline failed: {exc}")
+                            raise
 
-        st.rerun()
+            if _pipeline_ok:
+                st.rerun()
 
     # ── RESULTS DISPLAY (if result already in session) ────────────────────────
     if "_agent_result" not in st.session_state:
