@@ -244,3 +244,79 @@ class TestOutputs:
         # print_summary now logs to DEBUG rather than stdout — just verify it doesn't raise
         summary, _ = self._run(contoso_inputs, default_benchmarks)
         outputs.print_summary(summary)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Fact Checker — CF-based ROI and payback helpers
+# ---------------------------------------------------------------------------
+
+class TestFactCheckerCFMetrics:
+    """
+    Unit tests for _compute_cf_roi_and_payback, which replicates the
+    '5Y CF with Payback' sheet formulas (I31 = ROI, I32 = payback).
+    """
+
+    def _run_fc(self, inputs, benchmarks):
+        from engine.fact_checker import _compute_cf_roi_and_payback
+        sq   = status_quo.compute(inputs, benchmarks)
+        depr = depreciation.compute(inputs, benchmarks)
+        ret  = retained_costs.compute(inputs, benchmarks, sq)
+        fc   = financial_case.compute(inputs, benchmarks, sq, ret, depr)
+        return fc, _compute_cf_roi_and_payback(fc, benchmarks)
+
+    def test_roi_positive(self, contoso_inputs, default_benchmarks):
+        """Azure should generate a positive 5Y CF ROI on the migration investment."""
+        _, (roi, _) = self._run_fc(contoso_inputs, default_benchmarks)
+        assert roi > 0, f"Expected positive ROI, got {roi:.3f}"
+
+    def test_payback_positive_and_bounded(self, contoso_inputs, default_benchmarks):
+        """Payback should be > 0 (not immediate) and ≤ 5 years for Contoso."""
+        _, (_, payback) = self._run_fc(contoso_inputs, default_benchmarks)
+        assert payback > 0, f"Payback should be > 0, got {payback:.2f}"
+        assert payback <= 5.0, f"Payback {payback:.2f} exceeds 5-year window"
+
+    def test_no_investment_returns_zero(self, contoso_inputs, default_benchmarks):
+        """When migration costs are zero, function returns (0, 0) gracefully."""
+        from engine.fact_checker import _compute_cf_roi_and_payback
+        from engine.models import ConsumptionPlan
+        from dataclasses import replace
+        # Zero out migration cost per VM
+        plan = contoso_inputs.consumption_plans[0]
+        zero_plan = ConsumptionPlan(
+            workload_name=plan.workload_name,
+            azure_vcpu=plan.azure_vcpu,
+            azure_memory_gb=plan.azure_memory_gb,
+            azure_storage_gb=plan.azure_storage_gb,
+            migration_cost_per_vm_lc=0.0,
+            migration_ramp_pct=plan.migration_ramp_pct,
+            annual_compute_consumption_lc_y10=plan.annual_compute_consumption_lc_y10,
+            annual_storage_consumption_lc_y10=plan.annual_storage_consumption_lc_y10,
+        )
+        from engine.models import BusinessCaseInputs
+        zero_inputs = BusinessCaseInputs(
+            engagement=contoso_inputs.engagement,
+            pricing=contoso_inputs.pricing,
+            datacenter=contoso_inputs.datacenter,
+            hardware=contoso_inputs.hardware,
+            incorporate_productivity_benefit=contoso_inputs.incorporate_productivity_benefit,
+            workloads=contoso_inputs.workloads,
+            consumption_plans=[zero_plan],
+        )
+        sq   = status_quo.compute(zero_inputs, default_benchmarks)
+        depr = depreciation.compute(zero_inputs, default_benchmarks)
+        ret  = retained_costs.compute(zero_inputs, default_benchmarks, sq)
+        fc   = financial_case.compute(zero_inputs, default_benchmarks, sq, ret, depr)
+        roi, payback = _compute_cf_roi_and_payback(fc, default_benchmarks)
+        assert roi == 0.0
+        assert payback == 0.0
+
+    def test_cf_payback_lt_5yr(self, contoso_inputs, default_benchmarks):
+        """CF payback for Contoso should be within the 5-year projection window."""
+        _, (_, payback) = self._run_fc(contoso_inputs, default_benchmarks)
+        assert 0 < payback <= 5.0, f"Payback {payback:.2f} not in (0, 5] years"
+
+    def test_roi_and_payback_sign_consistent(self, contoso_inputs, default_benchmarks):
+        """Positive ROI implies cumulative benefits exceeded investment, so payback achieved."""
+        _, (roi, payback) = self._run_fc(contoso_inputs, default_benchmarks)
+        if roi > 0:
+            assert payback > 0, "Positive ROI implies payback should be > 0 (within window)"
