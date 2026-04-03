@@ -14,12 +14,19 @@ Opens at **http://localhost:8501** in your browser.
 
 ## Step-by-Step Demo Flow
 
-### Step 1 · Client Intake
-**What to fill in:**
-- Client Name (e.g. `Contoso Corp`)
-- Currency (leave `USD`)
-- VMs to migrate (e.g. `500`)
-- Physical servers (e.g. `50`)
+### Recommended: Agent Intake (fully automated)
+1. Click **⚡ Agent Intake** in the sidebar
+2. Enter **Customer Name**, **Currency**, and (optionally) the migration horizon
+3. Upload the **RVTools .xlsx** export
+4. Expand *"⚙️ Optional Parameters"* if ACO/ECIF credits or DC exit count apply
+5. Click **⚡ Parse & Build Business Case**
+
+Navigate straight to **4 · Results** — everything else is auto-derived.
+
+---
+
+### Manual flow (if no RVTools file)
+- Use **vCPU / pCore ratio toggle** to set the virtualization ratio (auto-set from RVTools if available; default 1.97)
 - vCPU total (e.g. `4000`)
 - Memory GB total (e.g. `12000`)
 - Storage TB total (e.g. `500`)
@@ -53,11 +60,11 @@ If you do change something, the **"↺ Reset to Defaults"** button is at the top
 
 | Tab | Talking point |
 |-----|---------------|
-| **📊 Exec Summary** | Lead with **CF NPV (10-Year)** and **Payback**. Use the dual 5Y / 10Y charts to show cost crossover. Waterfall shows *where* the savings come from. |
-| **💰 Cash Flow** | If pressed on methodology — CAPEX is actual spend year of purchase, not depreciated. Toggle 5Y / 10Y. |
-| **📋 P&L** | Use only if the customer's finance team wants the depreciation view. |
-| **🔍 Fact Check** | If you've pre-filled the Excel template and saved it, upload it here to prove the engine matches the spreadsheet. |
-| **📽️ Present** | Switch here for screen-share. Press **F11** in browser for full-screen. All charts and KPIs, no app chrome. |
+| **📊 Exec Summary** | Lead with **CF NPV (10-Year)** and **Payback**. The dual 5Y / 10Y charts show cost crossover. Waterfall shows *where* savings come from. |
+| **💰 Cash Flow** | CAPEX is actual spend the year of purchase, not depreciated. Toggle 5Y / 10Y. |
+| **📋 P&L** | Use only if the customer’s finance team wants the depreciation view. |
+| **🔍 Fact Check** | Pre-fill the Excel template, save it in Excel (Ctrl+Alt+F9, then Save), upload here. The engine scores parity across 9 KPIs; ≥90% = ready to present. |
+| **🎥 Present** | Screen-share mode. Press **F11** for full-screen. |
 
 ---
 
@@ -83,8 +90,10 @@ If you do change something, the **"↺ Reset to Defaults"** button is at the top
 
 - **Retained CAPEX drops to zero mid-table** — that's correct; once migration completes, no new on-prem hardware purchases.
 - **Migration cost only appears in early years** — one-time ramp cost, expected.
-- **P&L NPV is lower than CF NPV** — depreciation spreads the hardware cost over multiple years, which reduces apparent early-year savings; both views are correct.
-- **Fact Check shows SKIP for some rows** — those cells weren't cached in the uploaded workbook. Open the file in Excel, press Ctrl+Alt+F9 (full recalc), save, then re-upload.
+- **P&L NPV is lower than CF NPV** — depreciation spreads hardware cost over multiple years, which reduces apparent early-year savings; both views are correct.
+- **Fact Check shows SKIP for some rows** — those cells weren’t cached in the uploaded workbook. Open the file in Excel, press Ctrl+Alt+F9 (full recalc), save, then re-upload.
+- **Fact Check ROI or Payback shows divergence** — the engine uses the Template’s 5Y CF payback methodology (one-time investment vs ongoing P&L savings). Ensure the workbook has been recalculated and saved. If the migration has zero cost-per-VM, ROI and payback will both show 0 — this is correct.
+- **vCPU/pCore ratio shows 7.0** — the old default. If you see this, upgrade to the latest version and confirm the ratio is loaded from the vHost tab of the RVTools export.
 
 ---
 

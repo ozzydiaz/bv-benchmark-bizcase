@@ -1,6 +1,6 @@
 # BV Benchmark Business Case Engine
 
-Automates the BV Benchmark Business Case Excel workbook (v6) as a Python engine + Streamlit application. Upload an RVtools export and the engine **automatically derives** on-premises inventory, right-sizes Azure targets, infers the deployment region, fetches live Azure Retail Prices API pricing, and produces a validated on-premises TCO vs. Azure migration financial case: NPV, ROI, payback, and full 10-year P&L.
+Automates the BV Benchmark Business Case Excel workbook (v6) as a Python engine + Streamlit application. Upload an RVtools export and the engine **automatically derives** on-premises inventory, right-sizes Azure targets per VM using SKU-matched GiB-accurate Azure consumption, infers the deployment region, fetches live Azure Retail Prices API pricing, and produces a validated on-premises TCO vs. Azure migration financial case: NPV, ROI, payback, and full 10-year P&L.
 
 The only inputs a seller needs to provide are:
 - RVtools `.xlsx` export  
@@ -43,8 +43,10 @@ Navigate to `http://localhost:8501`.  The app walks through four steps:
 
 1. **Step 1 — Intake** Upload an RVtools `.xlsx` export *or* enter VM inventory manually.  
 2. **Step 2 — Consumption Plan** Enter (or have auto-estimated) Azure PAYG run-rate and migration schedule.  
-3. **Step 3 — Results** Financial case summary: NPV, ROI, payback, 10-year P&L waterfall.  
-4. **Step 4 — Export** Download a formatted PowerPoint / Excel output.
+3. **Step 3 — Benchmarks** Review or override any of the 57+ cost and sizing assumptions.  
+4. **Step 4 — Results** Financial case summary: NPV, ROI, payback, 10-year P&L waterfall.  
+5. **Step 5 — Export** Download a formatted PowerPoint / Excel output.  
+6. **Fact Checker** Upload a saved workbook for bidirectional engine ↔ Excel parity validation.
 
 ### Run the Engine directly
 
@@ -246,7 +248,7 @@ Where:
 |---|---|
 | Server acquisition | `pcores × cost_per_core + (pcores ÷ vcpu_to_pcores_ratio × vmem_to_pmem_ratio) × cost_per_gb_mem` |
 | DC power (kW) | `TDP_W/core × pcores × watt_to_kW ÷ load_factor × PUE ÷ (1 − overhead)` |
-| IT admin | `⌈total_vms ÷ vms_per_sysadmin⌉ × sysadmin_fully_loaded_cost` |
+| IT admin | `round(grown_vms_yr ÷ vms_per_sysadmin) × sysadmin_fully_loaded_cost` (headcount rounds per year with VM growth) |
 | Network fitout | Routers + switches only when `num_dcs > 0`; cabinet cost always |
 | Virtualization | `pcores_with_virtualization × virtualization_license_per_core_yr` |
 | Windows Server | `pcores_with_windows_server × license_rate_per_core_yr` (price level B or D) |
@@ -381,12 +383,15 @@ All 51+ benchmark parameters can be overridden per engagement.  Key parameters:
 ```
 bv-benchmark-bizcase/
 ├── app/
-│   ├── main.py                  # Streamlit entry point (4 pages)
+│   ├── main.py                  # Streamlit entry point
 │   └── pages/
 │       ├── intake.py            # Step 1: VM inventory, region, storage mode
 │       ├── consumption.py       # Step 2: Azure PAYG estimate + migration ramp presets
-│       ├── results.py           # Step 3: Financial case summary + charts
-│       └── export.py            # Step 4: PowerPoint / Excel output
+│       ├── benchmarks.py        # Step 3: Benchmark overrides
+│       ├── results.py           # Step 4: Financial case summary + charts
+│       ├── export.py            # Step 5: PowerPoint / Excel output
+│       ├── fact_checker_page.py # Fact Checker: engine ↔ Excel cross-check
+│       └── agent_intake.py      # ⚡ Agent Intake: automated pipeline
 ├── engine/
 │   ├── models.py                # Pydantic input/config models + MIGRATION_RAMP_PRESETS
 │   ├── rvtools_parser.py        # RVtools .xlsx parser (vInfo/vCPU/vMemory/vDisk/vHost/vMetaData)
@@ -400,7 +405,8 @@ bv-benchmark-bizcase/
 │   ├── financial_case.py        # Full 11-year P&L matrix (SQ + Azure)
 │   ├── productivity.py          # IT Productivity benefit module
 │   ├── net_interest_income.py   # Net Interest Income module
-│   └── outputs.py               # NPV, ROI, payback, waterfall metrics
+│   ├── outputs.py               # NPV, ROI, payback, waterfall metrics
+│   └── fact_checker.py          # Bidirectional engine ↔ Excel parity validator
 ├── data/
 │   ├── benchmarks_default.yaml  # 57+ benchmark + right-sizing parameters
 │   └── region_map.yaml          # GMT offset / TLD / datacenter keyword → Azure region
@@ -408,7 +414,8 @@ bv-benchmark-bizcase/
 │   ├── validate_vs_reference.py # Track A (parser) + Track B (engine) validation
 │   └── fact_check.py            # CLI: compare engine vs any saved client workbook
 ├── tests/
-│   └── test_engine.py           # 30 unit tests
+│   ├── test_engine.py           # 58 unit tests
+│   └── test_rvtools_to_inputs.py # RVtools parser integration tests
 └── README.md
 ```
 
@@ -472,16 +479,19 @@ Mismatches here mean the engine and the workbook are not modelling the same cust
 
 #### Phase 3 — Output cells read from 'Summary Financial Case'
 
-| Cell | KPI | Engine field |
+| Cell | KPI | Engine computation |
 |---|---|---|
-| C9 | Project NPV (10-yr, incl. terminal value) | `npv_10yr_with_terminal_value` |
-| C10 | Project NPV (10-yr, excl. terminal value) | `npv_10yr` |
-| C8 | Terminal Value (PV) | `terminal_value` |
-| E6 | 10-Year ROI | `roi_10yr` |
-| E11 | Payback period (years) | `payback_years` |
-| C6 | NPV of SQ costs (10-yr) | `_npv(sq_total, wacc, 10)` |
-| C7 | NPV of Azure costs (10-yr) | `_npv(az_total, wacc, 10)` |
-| D6 | NPV of SQ costs (5-yr) | `_npv(sq_total, wacc, 5)` |
+| C9 | Project NPV (10-yr, incl. terminal value) | `summary.npv_10yr_with_terminal_value` |
+| C10 | Project NPV (10-yr, excl. terminal value) | `summary.npv_10yr` |
+| C8 | Terminal Value (PV) | `summary.terminal_value` |
+| E6 | 5Y CF ROI (migration investment recovery) | `_compute_cf_roi_and_payback()` |
+| E11 | Payback period — 5Y CF (years) | `_compute_cf_roi_and_payback()` |
+| C6 | NPV of SQ costs (10-yr) | `_npv_series(sq_total, 10)` |
+| D6 | NPV of SQ costs (5-yr) | `_npv_series(sq_total, 5)` |
+| C7 | NPV of Azure costs (10-yr) | `_npv_series(az_total, 10)` |
+| D7 | NPV of Azure costs (5-yr) | `_npv_series(az_total, 5)` |
+
+> **ROI and Payback methodology:** Template cells E6 and E11 reference the `'5Y CF with Payback'` sheet which uses a **5-year discounted CF** methodology — it measures how quickly the *ongoing P&L savings* recover the *one-time migration investment NPV*. The engine replicates this via `_compute_cf_roi_and_payback()`, not the simpler 10-year P&L ROI ratio.
 
 ### Severity thresholds
 
@@ -490,14 +500,14 @@ Thresholds are tighter for the headline KPIs that customers and finance teams fo
 | Metric | PASS if Δ% ≤ | WARN if Δ% ≤ | Weight |
 |---|---|---|---|
 | Project NPV (10-yr) | 2% | 5% | 25% |
-| Payback period | 5% | 10% | 20% |
-| ROI (10-yr) | 2% | 5% | 15% |
-| NPV total benefits | 2% | 5% | 10% |
-| NPV total costs | 2% | 5% | 10% |
-| NPV infra savings | 3% | 7% | 8% |
-| Terminal value | 3% | 7% | 5% |
-| NPV admin savings | 5% | 10% | 4% |
-| Investment NPV | 5% | 10% | 3% |
+| Payback period (5Y CF) | 5% | 10% | 20% |
+| ROI (5Y CF) | 2% | 5% | 15% |
+| Terminal value | 3% | 7% | 10% |
+| NPV SQ (10-yr) | 2% | 5% | 8% |
+| NPV Azure (10-yr) | 2% | 5% | 8% |
+| Project NPV excl. TV | 2% | 5% | 6% |
+| NPV SQ (5-yr) | 2% | 5% | 4% |
+| NPV Azure (5-yr) | 2% | 5% | 4% |
 
 ### Confidence Score
 
@@ -533,7 +543,9 @@ python scripts/fact_check.py --workbook path/to/client.xlsm --strict
 python scripts/fact_check.py --workbook path/to/client.xlsm --json
 ```
 
-### App usage (Step 4 → Fact Check tab)
+### App usage (Fact Checker tab)
+
+Navigate to **🔍 Fact Checker** in the sidebar and select the **📋 Excel Cross-Check** tab.
 
 Upload any saved `.xlsm` or `.xlsx`. The tab displays:
 - Confidence score (colour-coded: green ≥ 90%, amber ≥ 70%, red < 70%)
@@ -569,21 +581,26 @@ if report.confidence_score >= 90:
 | IT Productivity | ✓ Implemented | Ramped with migration schedule |
 | Net Interest Income | ✓ Implemented | Earned on positive cash differential position |
 | AVS (Azure VMware Solution) | ⏳ Not yet | `byol_virtualization_for_avs` field reserved |
-| PowerPoint export | ⏳ Not yet | Export page stub only |
+| Per-VM rightsizing engine | ✓ Implemented | SKU-matched GiB-accurate sizing; E/D/M series selection; fallback logic |
+| vCPU/pCore ratio auto-detection | ✓ Implemented | Derived from RVtools vHost tab; manually overridable |
+| Hardware renewal M12 factor | ✓ Implemented | Applied to retained CAPEX and depreciation during migration |
+| Retained maintenance baseline | ✓ Implemented | Uses Y0 static baseline (not grown SQ costs) |
+| PowerPoint export | ✓ Implemented | Dark-theme deck: KPI cards + charts slide 1, cashflow table slide 2 |
+| Excel pre-fill export | ✓ Implemented | Fills Template v6 yellow input cells; user recalculates macros in Excel |
 
 ---
 
 ## Testing
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v   # 58 tests; all pass with RVTools export present
 ```
 
 ```bash
 python scripts/validate_vs_reference.py
 ```
 
-Expected output: `Track A: PASS ✓ | Track B: 30/30 PASS ✓ | 0 failures`
+Expected output: `Track A: PASS ✓ | Track B: PASS ✓ | 0 failures`
 
 ```bash
 python scripts/_smoke_new_pipeline.py

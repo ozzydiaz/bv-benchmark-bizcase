@@ -113,9 +113,10 @@ Walk through the numbered steps in order:
 |---|---|
 | 1 · Client Intake | Enter customer name, currency, VM/server inventory |
 | 2 · Consumption Plan | Set migration horizon, Azure sizing, ACO/ECIF |
-| 3 · Benchmarks | Review / override all 57 cost assumptions |
+| 3 · Benchmarks | Review / override all 57+ cost assumptions |
 | 4 · Results | View full financial analysis |
 | 5 · Export | Download PPTX / Excel |
+| Fact Checker | Upload saved workbook for engine ↔ Excel parity check |
 
 ---
 
@@ -126,9 +127,9 @@ Walk through the numbered steps in order:
 python -m pytest tests/ -q
 ```
 
-Expected output: **51 passed** (with RVTools file present in root).
+Expected output: **58 passed** (with RVTools file present in root).
 
-Without the RVTools file, 21 tests are skipped and 30 pass.
+Without the RVTools file, RVTools-dependent tests are skipped.
 
 ---
 
