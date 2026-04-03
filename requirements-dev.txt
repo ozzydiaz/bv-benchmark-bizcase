@@ -1,0 +1,2 @@
+# Dev / test only — not installed in production (Streamlit Cloud / Docker)
+pytest>=8.0
