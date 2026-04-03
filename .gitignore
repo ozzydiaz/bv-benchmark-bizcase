@@ -23,6 +23,9 @@ Thumbs.db
 *.xlsx
 RVTools_*.xlsx
 
+# Archive folder — manually completed business case examples used for trial runs
+archive/
+
 # Secrets
 *.env
 secrets.toml
