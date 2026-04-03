@@ -39,14 +39,18 @@ pip install -r requirements.txt
 streamlit run app/main.py
 ```
 
-Navigate to `http://localhost:8501`.  The app walks through four steps:
+Navigate to `http://localhost:8501`.  The sidebar has two ways to use the app:
 
-1. **Step 1 — Intake** Upload an RVtools `.xlsx` export *or* enter VM inventory manually.  
-2. **Step 2 — Consumption Plan** Enter (or have auto-estimated) Azure PAYG run-rate and migration schedule.  
-3. **Step 3 — Benchmarks** Review or override any of the 57+ cost and sizing assumptions.  
-4. **Step 4 — Results** Financial case summary: NPV, ROI, payback, 10-year P&L waterfall.  
-5. **Step 5 — Export** Download a formatted PowerPoint / Excel output.  
-6. **Fact Checker** Upload a saved workbook for bidirectional engine ↔ Excel parity validation.
+**⚡ Agent Intake (recommended)** — 3-layer checkpoint wizard:
+1. **Upload** your RVTools `.xlsx` export + customer name  
+2. **Layer 1 — Inventory** Review parsed fleet, OS/SQL profile, inferred region, live pricing. Override region/currency if needed. Approve to continue.
+3. **Layer 2 — Rightsizing** Review per-VM rightsizing, telemetry coverage, anomaly list. Tune headroom sliders if needed. Approve to continue.
+4. **Layer 3 — Financial Model** Review NPV, ROI, payback, cost comparison chart. Add named alternative scenarios side-by-side. Approve to continue.
+5. **Export** Download formatted PowerPoint or pre-filled Excel.
+
+Each approved layer collapses to a compact summary banner with a **← Revise** button. No work is lost if you revise a layer.
+
+**Manual steps (1–5)** — Walk through the numbered steps in the sidebar for full manual control over inventory entry, consumption plan, and benchmark overrides.
 
 ### Run the Engine directly
 
@@ -60,6 +64,23 @@ fc = financial_case.compute(inputs, benchmarks, sq, rc, depr)
 summary = outputs.compute(inputs, benchmarks, fc)
 outputs.print_summary(summary)
 ```
+
+### Deploy on Streamlit Community Cloud
+
+The app is live at **[bv-benchmark-bizcase.streamlit.app](https://bv-benchmark-bizcase.streamlit.app)** — no install required for end users. Pushes to `main` trigger an automatic redeploy.
+
+To deploy your own instance:
+1. Fork the repo, connect it to [share.streamlit.io](https://share.streamlit.io)
+2. Main file: `app/main.py` | Python version: `3.11`
+3. No secrets needed — Azure Retail Prices API is public
+
+### Run with Docker
+
+```bash
+docker compose up
+```
+
+App available at `http://localhost:8501`. Mounts the project root as a volume for live code reloading.
 
 ### Validate against reference workbook
 
@@ -391,13 +412,14 @@ bv-benchmark-bizcase/
 │       ├── results.py           # Step 4: Financial case summary + charts
 │       ├── export.py            # Step 5: PowerPoint / Excel output
 │       ├── fact_checker_page.py # Fact Checker: engine ↔ Excel cross-check
-│       └── agent_intake.py      # ⚡ Agent Intake: automated pipeline
+│       └── agent_intake.py      # ⚡ Agent Intake: 3-layer checkpoint wizard (925 lines)
 ├── engine/
 │   ├── models.py                # Pydantic input/config models + MIGRATION_RAMP_PRESETS
 │   ├── rvtools_parser.py        # RVtools .xlsx parser (vInfo/vCPU/vMemory/vDisk/vHost/vMetaData)
 │   ├── region_guesser.py        # Azure region inference (TLD → DC consensus → GMT → keyword)
 │   ├── azure_sku_matcher.py     # Azure Retail Prices API client + 24h disk cache
-│   ├── consumption_builder.py   # Right-size + ConsumptionPlan auto-build
+│   ├── consumption_builder.py   # Right-size + ConsumptionPlan + RightsizingValidation
+│   ├── vm_rightsizer.py         # Per-VM rightsizing (util cap, headroom, family selection)
 │   ├── disk_tier_map.py         # Azure managed disk tier tables (E-series + P-series)
 │   ├── status_quo.py            # On-prem 10-year cost baseline
 │   ├── retained_costs.py        # Declining on-prem costs during migration
@@ -405,17 +427,26 @@ bv-benchmark-bizcase/
 │   ├── financial_case.py        # Full 11-year P&L matrix (SQ + Azure)
 │   ├── productivity.py          # IT Productivity benefit module
 │   ├── net_interest_income.py   # Net Interest Income module
-│   ├── outputs.py               # NPV, ROI, payback, waterfall metrics
+│   ├── outputs.py               # NPV, ROI, payback, waterfall; compute_cf_roi_and_payback()
+│   ├── parsers/__init__.py       # InventoryParser Protocol (source-agnostic)
 │   └── fact_checker.py          # Bidirectional engine ↔ Excel parity validator
 ├── data/
 │   ├── benchmarks_default.yaml  # 57+ benchmark + right-sizing parameters
+│   ├── azure_vm_catalog.json    # Static Azure VM SKU specs (D/E/F/M series)
 │   └── region_map.yaml          # GMT offset / TLD / datacenter keyword → Azure region
 ├── scripts/
 │   ├── validate_vs_reference.py # Track A (parser) + Track B (engine) validation
 │   └── fact_check.py            # CLI: compare engine vs any saved client workbook
 ├── tests/
-│   ├── test_engine.py           # 58 unit tests
+│   ├── test_engine.py           # 64 unit tests
 │   └── test_rvtools_to_inputs.py # RVtools parser integration tests
+├── .streamlit/
+│   └── config.toml              # Dark theme, 100 MB upload limit
+├── Dockerfile                   # python:3.11-slim, EXPOSE 8501
+├── docker-compose.yml           # Single service, port 8501, volume mount
+├── requirements.txt             # Runtime dependencies
+├── requirements-dev.txt         # Dev-only deps (pytest)
+├── packages.txt                 # apt deps for Streamlit Cloud (libexpat1)
 └── README.md
 ```
 
@@ -593,7 +624,7 @@ if report.confidence_score >= 90:
 ## Testing
 
 ```bash
-pytest tests/ -v   # 58 tests; all pass with RVTools export present
+pytest tests/ -v   # 64 tests; all pass with RVTools export present
 ```
 
 ```bash

@@ -20,7 +20,7 @@ Given an **RVTools export** and a **customer name**, it automatically:
 
 | Requirement | Notes |
 |---|---|
-| Python 3.11 or later | Tested on 3.14.2 |
+| Python 3.11 or later | Streamlit Cloud runs 3.11; local dev tested on 3.11+ |
 | Git | To clone the repo |
 | Internet access | To fetch Azure Retail Prices (falls back to benchmarks if offline) |
 | RVTools export (.xlsx) | Standard RVTools "All to xlsx" export |
@@ -89,21 +89,90 @@ The app opens at **http://localhost:8501** in your browser.
 
 ### Option A — Agent Intake (recommended, automated)
 
-1. Click **⚡ Agent Intake** in the sidebar
-2. Enter the **customer name** and **currency**
-3. Upload the **RVTools .xlsx** export
-4. Optionally expand *"⚙️ Optional Parameters"* to set migration horizon, ACO/ECIF credits, or number of DCs to exit
-5. Click **⚡ Parse & Build Business Case**
+The Agent Intake page runs as a **3-layer checkpoint wizard**. The engine stops after each layer, shows you the full results, and waits for your approval before proceeding. You can review, override, and re-run each layer independently without losing downstream work.
 
-The engine runs automatically. You will see:
-- Parsed inventory summary (VMs, hosts, vCPUs, memory, storage)
-- OS and license profile (Windows, ESU, SQL with Prod/Non-Prod classification — Production assumed when no environment tags present)
-- Azure right-sizing (P95 utilisation-based or fallback)
-- Business case KPI preview + 5-Year cost comparison chart
+#### Step bar
 
-Then navigate directly to:
-- **4 · Results** — full interactive analysis (5 tabs)
-- **5 · Export** — download PowerPoint or pre-filled Excel
+```
+Upload  →  Inventory ✅  →  Rightsizing ✅  →  Financial ✅  →  Export
+```
+
+Approved layers collapse into compact green summary banners with a **← Revise** button if you need to re-open them.
+
+---
+
+#### Layer 1 — Inventory checkpoint
+
+**What happens:** The engine parses the RVTools export, infers the Azure region (TLD → DC consensus → GMT → keyword), and fetches live PAYG pricing from the Azure Retail Prices API.
+
+**What to review:**
+- VM count, powered-on subset, vCPU, memory, storage
+- OS profile: Windows, ESU-eligible, SQL Prod/Non-Prod
+- Inferred Azure region and pricing source (live API vs benchmark fallback)
+- ESU / SQL caveats (amber banners when data is inferred)
+
+**Override options** (expand ⚙️ Layer 1 Overrides):
+| Override | Effect |
+|---|---|
+| Force Azure Region | Override the inferred region and re-fetch live prices |
+| Rename Client | Update the client name shown in outputs |
+| Change Currency | Switch the display currency |
+
+**Pre-flight before approving:** Choose **Migration Horizon** (5 or 10 years) and **Storage Mode** (`Per-VM disk tiers` or `Fleet aggregate`). These flow into Layer 2.
+
+Click **✅ Approve Inventory — Proceed to Rightsizing** to continue.
+
+---
+
+#### Layer 2 — Rightsizing checkpoint
+
+**What happens:** Per-VM rightsizing runs using P95 utilisation telemetry (with headroom), plus a `RightsizingValidation` checkpoint that audits signal quality.
+
+**What to review:**
+- **Telemetry coverage** — % of VMs with per-VM CPU/memory telemetry vs host-proxy vs benchmark fallback
+- **vCPU delta** — how much the rightsized vCPU count changed vs on-prem
+- **Memory delta** — same for memory
+- **Anomaly list** — VMs where the rightsized vCPU is more than 2× the source vCPU (likely balloon artefacts); review before approving
+- Cost preview: per-VM/hr rate, estimated Azure run-rate
+
+**Override options** (expand ⚙️ Layer 2 Overrides):
+| Override | Effect |
+|---|---|
+| CPU Headroom % | Headroom added above P95 CPU (default 20%) |
+| Memory Headroom % | Headroom added above P95 memory (default 20%) |
+| Fallback % | CPU/memory retention when telemetry absent |
+| Storage Mode | Switch between Per-VM and Fleet-aggregate |
+
+Click **✅ Approve Rightsizing — Proceed to Financial Model** to continue.
+
+---
+
+#### Layer 3 — Financial model checkpoint
+
+**What happens:** The full 10-year (or 5-year) P&L and cash-flow financial model runs, including status quo TCO, retained costs, depreciation, migration ramp, IT productivity, and NII.
+
+**What to review:**
+- **Headline KPIs**: Project NPV, ROI (5Y CF), Payback period, Azure cost/VM/yr
+- **Cost comparison chart**: On-Prem vs Azure annual costs with CF savings annotation
+- **Sanity checks**: sign consistency, payback within horizon, Azure < On-Prem per VM
+
+**Override options** (expand ⚙️ Layer 3 Overrides):
+| Override | Effect |
+|---|---|
+| WACC % | Discount rate for NPV (default 7%) |
+| DCs to Exit | Number of datacentres decommissioned |
+| Horizon | Switch between 5-year and 10-year analysis |
+| ACO / ECIF Credits | Year-by-year Azure funding credits |
+
+**Scenario comparison:** Use the **Add Scenario** button to run an alternative set of Layer 3 overrides side-by-side. Named scenarios appear as additional columns in the KPI table and additional lines on the chart.
+
+Click **✅ Approve Financial Model — Proceed to Export** to continue.
+
+---
+
+#### Layer 4 — Export
+
+Download a formatted **PowerPoint** (dark-theme deck with KPI cards + 5Y/10Y charts) or a pre-filled **Excel** (Template v6 yellow cells populated; user recalculates macros in Excel).
 
 ### Option B — Manual Intake (step-by-step)
 
@@ -127,7 +196,7 @@ Walk through the numbered steps in order:
 python -m pytest tests/ -q
 ```
 
-Expected output: **58 passed** (with RVTools file present in root).
+Expected output: **64 passed** (with RVTools file present in root).
 
 Without the RVTools file, RVTools-dependent tests are skipped.
 
@@ -171,7 +240,30 @@ All other sheets are ignored.
 
 ---
 
-## 10. Troubleshooting
+## 10. Sharing with colleagues (Streamlit Community Cloud)
+
+The app is deployed at **[bv-benchmark-bizcase.streamlit.app](https://bv-benchmark-bizcase.streamlit.app)** — no install required.
+
+Anyone with the link and a browser can use the full 3-layer checkout wizard. No Python, no Git, no local setup.
+
+### What colleagues need
+- The URL above
+- An RVTools `.xlsx` export for their customer
+- Nothing else — the app runs entirely in the cloud
+
+### Re-deploying after code changes
+Pushes to `main` trigger an automatic redeploy on Streamlit Cloud (usually 2–3 minutes). No action needed.
+
+### Running the app locally instead
+If Streamlit Cloud is unavailable or you want to use a local RVTools file without uploading it, run locally:
+
+```bash
+streamlit run app/main.py
+```
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Fix |
 |---|---|

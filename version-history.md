@@ -5,6 +5,105 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## v1.1.1 — Streamlit Cloud Deployment
+**Commits:** `2df5a81`, `e7769cb` | **Date:** 2026-04-03 | **Tests:** 64 ✅
+
+### What changed
+
+**Streamlit Cloud readiness (`2df5a81`):**
+- `requirements.txt`: removed `pytest` (dev-only dep, adds ~30s to Cloud builds)
+- `requirements-dev.txt`: new file — `pytest>=8.0` only; used for local test runs
+- `packages.txt`: `libexpat1` for Streamlit Cloud Ubuntu runner
+- `.streamlit/config.toml`: dark theme, 100 MB upload limit, `gatherUsageStats = false`
+- `.gitignore`: added `.cache/` (Azure pricing JSON cache, Cloud fetches fresh); `.streamlit/secrets.toml` excluded, `config.toml` tracked
+- `Dockerfile`: `python:3.11-slim`, EXPOSE 8501, healthcheck at `/app/main.py`
+- `docker-compose.yml`: single `bv-bc` service, port 8501, project root volume-mounted
+
+**Fix: `packages.txt` comments caused fatal build error (`e7769cb`):**  
+`apt-get install` parses every non-blank line as a package name — including `#` comment lines. The error `E: Unable to locate package #` caused Streamlit Cloud builds to fail. Removed all comment lines; `packages.txt` now contains only `libexpat1`.
+
+The app is now live at **[bv-benchmark-bizcase.streamlit.app](https://bv-benchmark-bizcase.streamlit.app)**.
+
+---
+
+## v1.1.0 — UI: 3-Layer Checkpoint Wizard
+**Commit:** `2ea5c64` | **Date:** 2026-04-03 | **Tests:** 64 ✅
+
+### What changed
+
+Complete rewrite of `app/pages/agent_intake.py` (925 lines). The Agent Intake page is now a sequential **3-layer checkpoint wizard**. The engine stops after each layer, displays the full results, and waits for the user's explicit approval before proceeding. No work is lost if a layer is revised.
+
+#### Architecture
+
+Session state machine keyed on `_wiz_step` (0 = Upload → 4 = Export):
+
+```
+Upload(0) → Inventory(1) → Rightsizing(2) → Financial(3) → Export(4)
+```
+
+Visual step bar with ✅ / 🔵 / ○ badges. Approved layers collapse to compact green banners with a **← Revise** button.
+
+#### Layer 1 — Inventory checkpoint
+- Parse RVTools export, infer Azure region, fetch live PAYG pricing
+- Shows fleet summary, OS/SQL profile, pricing source
+- **Override panel** (collapsed by default): force region, rename client, change currency → triggers L1 re-run
+- **Pre-flight** before approving: migration horizon (5/10 yr), storage mode (per-VM / fleet aggregate)
+
+#### Layer 2 — Rightsizing checkpoint
+- Runs per-VM rightsizing using P95 telemetry (with `RightsizingValidation` checkpoint)
+- Shows telemetry coverage %, vCPU/memory delta vs on-prem, anomaly list (VMs where matched SKU > 2× source vCPU)
+- **Override panel**: CPU headroom % slider, memory headroom % slider, fallback %, storage mode toggle → triggers L2 re-run
+
+#### Layer 3 — Financial model checkpoint
+- Runs full financial model (P&L, CF, NPV, ROI, payback, NII, productivity)
+- Shows headline KPIs (NPV, ROI, payback, cost/VM/yr), cost comparison chart with CF savings annotation, engine sanity checks
+- **Override panel**: WACC slider, DC exit count, horizon, ACO/ECIF credits → triggers L3 re-run
+- **Scenario comparison**: Add named alternative L3 scenarios side-by-side (KPI table + chart lines)
+
+#### Layer 4 — Export
+- Download PowerPoint (dark-theme deck) or pre-filled Excel (Template v6 yellow cells)
+
+#### Key session state keys
+`_wiz_step`, `_wiz_file_bytes`, `_l1_result`, `_l2_result`, `_l3_result`, `_l3_scenarios`, `_agent_horizon`, `_agent_summary`, `_agent_client_name`, `_agent_currency`
+
+#### Supporting engine changes (part of `2ea5c64`)
+- `agent_intake.py`: ROI/payback display updated to `roi_cf` / `payback_cf` (CF-based methodology)
+- `results.py`: Exec summary + presentation tabs updated to `roi_cf` / `payback_cf`
+
+---
+
+## v1.0.0 — Engine: 3-Layer Architecture + Validation Checkpoint
+**Commit:** `aa77156` | **Date:** 2026-04-03 | **Tests:** 64 ✅
+
+### What changed
+
+**Layer 2 — Rightsizing: utilisation cap + `RightsizingValidation`**
+
+- `vm_rightsizer.py`: cap CPU/memory utilisation at `_UTIL_CAP = 0.95` before applying headroom.  
+  Prevents Azure vCPU inflation from VMware ballooning artefacts where `Consumed/Size > 1`.
+- `consumption_builder.py`:
+  - New `RightsizingValidation` dataclass (L1→L2 checkpoint): telemetry coverage %, anomaly detection (matched vCPU > 2× source), `vcpu_increased` / `memory_increased` flags
+  - `build()` retained as thin wrapper; `build_with_validation()` returns `(ConsumptionPlan, RightsizingValidation)`
+  - `_vm_storage_cost()`: flip storage priority to **in-use first** — `partition_consumed → inuse → disk_sizes×reduction → provisioned×reduction`
+  - Tracks `telemetry_count / host_proxy_count / fallback_count` per VM
+
+**Layer 3 — Financial Model: CF ROI/payback as primary output**
+
+- `outputs.py`: `compute_cf_roi_and_payback()` moved from `fact_checker.py` to `outputs.py` (public); `BusinessCaseSummary` gains `roi_cf` and `payback_cf` fields; `outputs.compute()` populates both at engine run time
+- `fact_checker.py`: imports `compute_cf_roi_and_payback` from `outputs`; backward-compat alias retained
+
+**Parser: `source_type` field**
+
+- `rvtools_parser.py`: `RVToolsInventory` gains `source_type = 'rvtools'`
+- `engine/parsers/__init__.py`: new `InventoryParser` Protocol (source-agnostic interface for future parsers)
+
+### New tests (+6, total 64)
+- `TestVMRightsizer`: util cap prevents inflation; fallback stays ≤ source vCPU
+- `TestConsumptionBuilderStorage`: storage priority order — partition_consumed > inuse > disk_sizes > provisioned
+- `TestFactCheckerCFMetrics`: backward-compat alias confirmed
+
+---
+
 ## v0.9.0 — Phase 3: Fact Checker Rearchitecture
 **Commit:** `b2f1598` | **Date:** 2026-04-02 | **Tests:** 58 ✅
 
