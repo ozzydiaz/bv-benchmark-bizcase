@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    # Mount the local workspace so code changes reflect without rebuilding
+    # Remove this volume mount when building a standalone distributable image
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

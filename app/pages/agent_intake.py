@@ -1,34 +1,38 @@
 """
-Page 0 — Agent Intake (Automated)
+Page 0 — Agent Intake (Layered Wizard)
 
-Cloud Economics & Business Value analyst persona.
-User provides: customer name, currency, RVTools export.
-Agent handles: inventory parsing, region inference, Azure pricing,
-right-sizing, and business case composition.
+Three-layer checkpoint workflow with per-layer review gates and override options:
 
-Optional inputs: migration horizon, ACO / ECIF credits.
+  Layer 1 · Inventory   — parse RVTools, infer region, fetch live pricing
+  Layer 2 · Rightsizing — per-VM SKU matching, validation checkpoint
+  Layer 3 · Financial   — business case computation, scenario comparison
+
+Each layer shows full results before the user explicitly approves and advances.
+Override panels allow re-running any layer with different parameters without
+losing the other layers' outputs.
 """
 from __future__ import annotations
 
 import io
+import tempfile
 import zipfile
+
 import streamlit as st
 import plotly.graph_objects as go
 
 from engine.models import BenchmarkConfig, MIGRATION_RAMP_PRESETS
 
-_CURRENCIES = ["USD", "GBP", "EUR", "CAD", "AUD", "JPY", "INR", "BRL", "MXN", "SGD"]
+# ─── Constants ────────────────────────────────────────────────────────────────
 
+_CURRENCIES   = ["USD", "GBP", "EUR", "CAD", "AUD", "JPY", "INR", "BRL", "MXN", "SGD"]
 _RAMP_OPTIONS = list(MIGRATION_RAMP_PRESETS.keys())
 
-# Human-readable labels for Azure pricing source
 _PRICING_SRC_LABEL = {
-    "api":       "Azure Retail Prices API",
+    "api":       "Azure Retail Prices API (live)",
     "cache":     "Azure Retail Prices API (cached)",
-    "benchmark": "Benchmark default (no live fetch)",
+    "benchmark": "Benchmark default (offline)",
 }
 
-# Smaller metrics via injected CSS (applied once per page render)
 _METRIC_CSS = """
 <style>
 [data-testid="stMetricValue"]  { font-size: 1.05rem !important; }
@@ -37,45 +41,171 @@ _METRIC_CSS = """
 </style>
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── Session-state helpers ────────────────────────────────────────────────────
 
-def _fmt(v: float) -> str:
-    return f"${v:,.0f}"
+def _step() -> int:
+    """0=upload, 1=L1 active, 2=L2 active, 3=L3 active, 4=export."""
+    return st.session_state.get("_wiz_step", 0)
 
+def _set_step(n: int) -> None:
+    st.session_state["_wiz_step"] = n
 
-def _run_pipeline(
-    file_bytes: bytes,
-    client_name: str,
-    currency: str,
-    ramp_preset: str,
-    aco_y1: float,
-    aco_y2: float,
-    aco_y3: float,
-    ecif_y1: float,
-    ecif_y2: float,
-    benchmarks: BenchmarkConfig,
-) -> "PipelineResult":  # noqa: F821 (imported inside to avoid top-level error on missing deps)
-    from engine.rvtools_to_inputs import build_business_case_from_bytes
-    aco  = [aco_y1,  aco_y2,  aco_y3,  0, 0, 0, 0, 0, 0, 0]
-    ecif = [ecif_y1, ecif_y2, 0,       0, 0, 0, 0, 0, 0, 0]
-    return build_business_case_from_bytes(
-        file_bytes=file_bytes,
-        client_name=client_name,
-        currency=currency,
-        ramp_preset=ramp_preset,
-        aco_by_year=aco,
-        ecif_by_year=ecif,
-        benchmarks=benchmarks,
+def _clear_from(layer: int) -> None:
+    keys = {
+        1: ["_l1_result", "_l2_result", "_l3_result", "_l3_scenarios", "inputs", "_agent_summary"],
+        2: [               "_l2_result", "_l3_result", "_l3_scenarios", "inputs", "_agent_summary"],
+        3: [                             "_l3_result", "_l3_scenarios",           "_agent_summary"],
+    }
+    for k in keys.get(max(1, layer), []):
+        st.session_state.pop(k, None)
+
+def _sym(currency: str = "USD") -> str:
+    return {"GBP": "£", "EUR": "€"}.get(currency, "$")
+
+def _fmt(v: float, currency: str = "USD") -> str:
+    return f"{_sym(currency)}{v:,.0f}"
+
+# ─── Step indicator ───────────────────────────────────────────────────────────
+
+def _step_bar() -> None:
+    step = _step()
+    labels = ["Upload", "Inventory", "Rightsizing", "Financial", "Export"]
+    badges = []
+    for i, lbl in enumerate(labels):
+        if i < step:
+            b = f'<span style="color:#22CC88;font-weight:bold">✅ {lbl}</span>'
+        elif i == step:
+            b = f'<span style="color:#50B0F0;font-weight:bold">🔵 {lbl}</span>'
+        else:
+            b = f'<span style="color:#666">○ {lbl}</span>'
+        badges.append(b)
+        if i < len(labels) - 1:
+            badges.append('<span style="color:#444"> → </span>')
+    st.markdown(
+        '<div style="font-size:0.9rem;padding:6px 0 12px">' + "".join(badges) + "</div>",
+        unsafe_allow_html=True,
     )
 
+# ─── Approved-layer compact banners ──────────────────────────────────────────
 
-def _inv_summary_card(result) -> None:
-    """Render parsed inventory summary as metric cards."""
-    inv = result.inventory
+def _l1_banner() -> None:
+    l1 = st.session_state.get("_l1_result", {})
+    inv = l1.get("inv")
+    if not inv:
+        return
+    text = (
+        f"{inv.num_vms:,} VMs · {inv.num_hosts} hosts · "
+        f"{l1.get('region', '?')} · {l1.get('client_name', '')}"
+    )
+    c1, c2 = st.columns([8, 1])
+    c1.success(f"✅ **Layer 1 — Inventory** — {text}")
+    if c2.button("← Revise", key="_revise_l1"):
+        _clear_from(2)
+        _set_step(1)
+        st.rerun()
 
-    st.markdown("#### 📋 Parsed Inventory")
+def _l2_banner() -> None:
+    l2 = st.session_state.get("_l2_result", {})
+    cp = l2.get("cp")
+    if not cp:
+        return
+    l1  = st.session_state.get("_l1_result", {})
+    inv = l1.get("inv")
+    red = ""
+    if inv and inv.total_vcpu_poweredon:
+        pct = (1 - cp.azure_vcpu / inv.total_vcpu_poweredon) * 100
+        red = f" · {pct:+.0f}% vCPU"
+    text = (
+        f"{cp.azure_vcpu:,} Azure vCPUs · {cp.azure_memory_gb:,.0f} GB RAM · "
+        f"{cp.azure_storage_gb:,.0f} GB storage{red}"
+    )
+    c1, c2 = st.columns([8, 1])
+    c1.success(f"✅ **Layer 2 — Rightsizing** — {text}")
+    if c2.button("← Revise", key="_revise_l2"):
+        _clear_from(3)
+        _set_step(2)
+        st.rerun()
+
+def _l3_banner() -> None:
+    l3 = st.session_state.get("_l3_result", {})
+    summary = l3.get("summary")
+    if not summary:
+        return
+    l1  = st.session_state.get("_l1_result", {})
+    cur = l1.get("currency", "USD")
+    pb  = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else ">5 yrs"
+    text = (
+        f"5-Yr CF ROI: {summary.roi_cf:.0%} · Payback: {pb} · "
+        f"CF NPV (5Y): {_fmt(summary.npv_cf_5yr, cur)}"
+    )
+    c1, c2 = st.columns([8, 1])
+    c1.success(f"✅ **Layer 3 — Financial Model** — {text}")
+    if c2.button("← Revise", key="_revise_l3"):
+        _clear_from(3)
+        _set_step(3)
+        st.rerun()
+
+# ─── Layer 1 — Inventory ─────────────────────────────────────────────────────
+
+def _run_layer1(
+    file_bytes:      bytes,
+    client_name:     str,
+    currency:        str,
+    region_override: str,
+) -> dict | None:
+    from engine.rvtools_parser import parse as _parse
+    from engine.region_guesser import guess as _guess_region
+    from engine.azure_sku_matcher import get_pricing as _get_pricing, get_vm_catalog as _get_vm_catalog
+
+    if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
+        st.error(
+            "🔒 File appears encrypted or corrupted.  \n"
+            "Open in Excel → File → Info → Protect Workbook → remove password → save → re-upload."
+        )
+        return None
+
+    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+        tmp.write(file_bytes)
+        tmp_path = tmp.name
+
+    try:
+        with st.status("🔍 Layer 1 — Parsing inventory…", expanded=True) as _s:
+            st.write("Parsing RVTools export…")
+            inv = _parse(tmp_path)
+            st.write(f"✔  {inv.num_vms:,} VMs · {inv.num_hosts} hosts")
+
+            st.write("Inferring Azure region…")
+            region = region_override.strip() if region_override.strip() else _guess_region(inv)
+            st.write(f"✔  Region: {region}")
+
+            st.write("Fetching Azure pricing and VM catalog…")
+            pricing    = _get_pricing(region=region)
+            vm_catalog = _get_vm_catalog(region=region)
+            st.write(f"✔  {_PRICING_SRC_LABEL.get(pricing.source, pricing.source)}")
+
+            _s.update(
+                label=f"✅ Inventory ready — {inv.num_vms:,} VMs · {region}",
+                state="complete", expanded=False,
+            )
+    except Exception as exc:
+        st.error(f"Layer 1 failed: {exc}")
+        return None
+
+    return {
+        "inv":         inv,
+        "region":      region,
+        "pricing":     pricing,
+        "vm_catalog":  vm_catalog,
+        "client_name": client_name,
+        "currency":    currency,
+        "tmp_path":    tmp_path,
+    }
+
+def _show_layer1() -> None:
+    l1  = st.session_state["_l1_result"]
+    inv = l1["inv"]
+
+    st.markdown("##### Fleet Overview")
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("VMs (TCO scope)",  f"{inv.num_vms:,}")
     c2.metric("Powered-On VMs",   f"{inv.num_vms_poweredon:,}")
@@ -86,222 +216,384 @@ def _inv_summary_card(result) -> None:
     d1, d2, d3, d4, d5 = st.columns(5)
     d1.metric("Storage (prov.)",  f"{inv.total_disk_provisioned_gb:,.0f} GB")
     d2.metric("vCPU/pCore ratio", f"{inv.vcpu_per_core_ratio:.2f}×")
-    d3.metric("Inferred Region",  result.region)
-    src_label = _PRICING_SRC_LABEL.get(result.pricing.source, result.pricing.source.upper())
-    src_note  = "(live)" if result.pricing.source == "api" else ("✓ cached" if result.pricing.source == "cache" else "")
-    d4.metric("Azure Pricing", src_label, delta=src_note or None, delta_color="off")
-    d5.metric("Warnings",         len(result.warnings) or "None")
+    d3.metric("Azure Region",     l1["region"])
+    d4.metric("Pricing",          _PRICING_SRC_LABEL.get(l1["pricing"].source, l1["pricing"].source))
+    d5.metric("Parse Warnings",   f"{len(inv.parse_warnings)}" if inv.parse_warnings else "None")
 
-    st.markdown("#### 🖥️ OS & License Profile")
+    st.markdown("##### License Profile")
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Windows pCores",   f"{inv.pcores_with_windows_server:,}")
-    esu_label = f"{inv.pcores_with_windows_esu:,}" + (" ⚠" if inv.esu_count_may_be_understated else "")
-    e2.metric("ESU pCores",       esu_label)
-
-    # SQL block
-    sql = result.sql_summary
-    src_badge = "🔍 detected" if sql["source"] == "application" else "📐 estimated (10% default)"
-    e3.metric("SQL Server pCores", f"{sql['pcores']:,}", delta=f"{sql['detected']} VMs — {src_badge}", delta_color="off")
-    e4.metric("SQL ESU pCores",   f"{sql['esu_pcores']:,}")
-
-    if sql["prod_assumed"]:
-        prod_label  = f"{sql['prod']} (all prod, assumed)"
-        prod_delta  = "no Environment tags — all assumed Production"
-    else:
-        prod_label  = f"{sql['prod']} Prod / {sql['nonprod']} Non-Prod"
-        prod_delta  = "from Environment tags"
-    e5.metric("SQL Prod / Non-Prod", prod_label, delta=prod_delta, delta_color="off")
+    esu_lbl = f"{inv.pcores_with_windows_esu:,}" + (" ⚠" if inv.esu_count_may_be_understated else "")
+    e2.metric("ESU pCores",       esu_lbl)
+    src_badge = "detected" if inv.sql_detection_source == "application" else "estimated (10%)"
+    e3.metric(
+        "SQL pCores",
+        f"{inv.pcores_with_sql_server:,}",
+        delta=f"{inv.sql_vms_detected} VMs — {src_badge}",
+        delta_color="off",
+    )
+    e4.metric("SQL ESU pCores",   f"{inv.pcores_with_sql_esu:,}")
+    prod_lbl = (
+        f"{inv.sql_vms_prod} Prod / {inv.sql_vms_nonprod} Non-Prod"
+        if not inv.sql_prod_assumed
+        else f"{inv.sql_vms_prod} (assumed prod)"
+    )
+    e5.metric("SQL Prod split", prod_lbl)
 
     if inv.esu_count_may_be_understated:
         st.warning(
-            f"**ESU undercount likely** — {inv.windows_vms_unknown_version:,} Windows Server VMs "
-            f"have no detectable OS version string (typically pre-2016). "
-            f"ESU pCore count may be understated. Override in Step 3 · Benchmarks if you have a separate OS audit."
+            f"**ESU undercount likely** — {inv.windows_vms_unknown_version:,} Windows VMs "
+            "have no detectable OS version string. ESU pCore count may be understated."
         )
-
-    if sql["prod_assumed"]:
+    if inv.sql_prod_assumed:
         st.info(
-            f"🟡 **Production assumed** — no Environment tags found in this inventory. "
-            f"All {inv.pcores_with_windows_server:,} Windows Server pCores and "
-            f"all {sql['detected']} SQL Server VMs are treated as **Production** for licensing cost purposes. "
-            f"If this estate includes Dev/Test workloads, tag the VMs in RVTools (Environment = \"Dev\" / \"Test\") "
-            f"and re-upload to recalculate with a split."
+            f"🟡 **SQL Production assumed** — no Environment tags found. "
+            f"All {inv.sql_vms_detected} SQL VMs treated as Production for licensing costs."
         )
-    elif not sql["env_tagging"]:
-        pass  # no Windows/SQL VMs so nothing to note
+    if inv.parse_warnings:
+        with st.expander(f"⚠️ {len(inv.parse_warnings)} parser warning(s)"):
+            for w in inv.parse_warnings:
+                st.warning(w)
 
-    if sql["source"] == "default":
-        st.info(
-            "SQL Server count estimated as 10% of Windows pCores (no Application attribute data found). "
-            "If actual SQL licensing data is available, override in Step 3 · Benchmarks."
+def _render_l1_override() -> None:
+    l1 = st.session_state["_l1_result"]
+    with st.expander("⚙️ Override inventory parameters & re-run", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        new_region   = c1.text_input(
+            "Force Azure region",
+            value=l1["region"],
+            help="E.g. 'uksouth', 'eastus', 'australiaeast'",
+            key="_l1ov_region",
         )
+        new_name     = c2.text_input("Client name", value=l1["client_name"], key="_l1ov_name")
+        new_currency = c3.selectbox(
+            "Currency", _CURRENCIES,
+            index=_CURRENCIES.index(l1.get("currency", "USD")),
+            key="_l1ov_currency",
+        )
+        if st.button("↺ Re-run Inventory with these settings", key="_rerun_l1"):
+            file_bytes = st.session_state.get("_wiz_file_bytes")
+            if not file_bytes:
+                st.error("File not in session — use 'Start over' to re-upload.")
+                return
+            result = _run_layer1(file_bytes, new_name.strip(), new_currency, new_region)
+            if result:
+                _clear_from(2)
+                st.session_state["_l1_result"] = result
+                _set_step(1)
+                st.rerun()
 
+# ─── Layer 2 — Rightsizing ────────────────────────────────────────────────────
 
-def _rightsizing_card(result) -> None:
-    """Right-sizing and Azure cost estimate."""
-    inv = result.inventory
-    plan = result.plan
+def _run_layer2(
+    ramp_preset:  str,
+    storage_mode: str,
+    bm:           BenchmarkConfig,
+) -> dict | None:
+    from engine.consumption_builder import build_with_validation
+    from engine.rvtools_to_inputs import workload_inventory_from_rvtools
 
-    reduction_vcpu = (1 - plan.azure_vcpu / max(inv.total_vcpu_poweredon, 1)) * 100
-    reduction_mem  = (1 - plan.azure_memory_gb / max(inv.total_vmemory_gb_poweredon, 1)) * 100
+    l1 = st.session_state.get("_l1_result")
+    if not l1:
+        st.error("Layer 1 result missing — complete inventory step first.")
+        return None
 
-    st.markdown("#### ☁️ Azure Right-Sizing")
+    inv         = l1["inv"]
+    pricing     = l1["pricing"]
+    region      = l1["region"]
+    client_name = l1["client_name"]
+
+    try:
+        with st.status("⚙️ Layer 2 — Per-VM rightsizing…", expanded=True) as _s:
+            st.write(f"Rightsizing {len(inv.vm_records):,} powered-on VMs…")
+            cp, rv = build_with_validation(
+                inv=inv,
+                pricing=pricing,
+                benchmarks=bm,
+                workload_name=client_name,
+                storage_mode=storage_mode,
+                ramp_preset=ramp_preset,
+                vm_catalog=l1.get("vm_catalog"),
+            )
+            wl = workload_inventory_from_rvtools(inv, region=region, workload_name=client_name)
+            _s.update(
+                label=(
+                    f"✅ Rightsizing — {cp.azure_vcpu:,} vCPUs · "
+                    f"{cp.azure_memory_gb:,.0f} GB RAM · {cp.azure_storage_gb:,.0f} GB storage"
+                ),
+                state="complete", expanded=False,
+            )
+    except Exception as exc:
+        st.error(f"Layer 2 failed: {exc}")
+        return None
+
+    return {
+        "cp":           cp,
+        "rv":           rv,
+        "wl":           wl,
+        "ramp_preset":  ramp_preset,
+        "storage_mode": storage_mode,
+        "bm":           bm,
+    }
+
+def _show_layer2() -> None:
+    l1  = st.session_state["_l1_result"]
+    l2  = st.session_state["_l2_result"]
+    inv = l1["inv"]
+    cp  = l2["cp"]
+    rv  = l2.get("rv")
+
+    reduction_vcpu = (1 - cp.azure_vcpu / max(inv.total_vcpu_poweredon, 1)) * 100
+    reduction_mem  = (1 - cp.azure_memory_gb / max(inv.total_vmemory_gb_poweredon, 1)) * 100
+
+    st.markdown("##### Right-Sized Azure Footprint")
     r1, r2, r3, r4, r5 = st.columns(5)
-    r1.metric("On-Prem vCPUs (powered-on)", f"{inv.total_vcpu_poweredon:,}")
-    r2.metric("Right-Sized Azure vCPUs",
-              f"{plan.azure_vcpu:,}",
-              delta=f"-{reduction_vcpu:.0f}% right-sized")
-    r3.metric("On-Prem Memory (powered-on)", f"{inv.total_vmemory_gb_poweredon:,.0f} GB")
-    r4.metric("Right-Sized Azure Memory",
-              f"{plan.azure_memory_gb:,.0f} GB",
-              delta=f"{reduction_mem:+.0f}%")
-    r5.metric("Azure Storage (prov.)",      f"{plan.azure_storage_gb:,.0f} GB")
+    r1.metric("On-Prem vCPUs",  f"{inv.total_vcpu_poweredon:,}")
+    r2.metric("Azure vCPUs",    f"{cp.azure_vcpu:,}",              delta=f"{reduction_vcpu:+.0f}%")
+    r3.metric("On-Prem Memory", f"{inv.total_vmemory_gb_poweredon:,.0f} GB")
+    r4.metric("Azure Memory",   f"{cp.azure_memory_gb:,.0f} GB",  delta=f"{reduction_mem:+.0f}%")
+    r5.metric("Azure Storage",  f"{cp.azure_storage_gb:,.0f} GB")
 
-    util_note = ""
-    if inv.cpu_util_p95 > 0:
-        util_note = f"Fleet CPU P95: {inv.cpu_util_p95:.0%}"
-    if inv.memory_util_p95 > 0:
-        util_note += f"  |  Memory P95: {inv.memory_util_p95:.0%}"
-
-    rv = getattr(result, "rightsizing_validation", None)
-    if rv is not None:
-        tele_pct = rv.telemetry_coverage_pct
+    if rv:
         parts = []
-        if rv.telemetry_vm_count:
-            parts.append(f"{rv.telemetry_vm_count} VM telemetry")
-        if rv.host_proxy_vm_count:
-            parts.append(f"{rv.host_proxy_vm_count} host proxy")
-        if rv.fallback_vm_count:
-            parts.append(f"{rv.fallback_vm_count} fallback")
+        if rv.telemetry_vm_count:  parts.append(f"{rv.telemetry_vm_count} VM telemetry")
+        if rv.host_proxy_vm_count: parts.append(f"{rv.host_proxy_vm_count} host proxy")
+        if rv.fallback_vm_count:   parts.append(f"{rv.fallback_vm_count} fallback factors")
         sig_str = " + ".join(parts) if parts else "fallback only"
-        caption = f"Per-VM rightsizing signal: {sig_str}  ({tele_pct:.0%} telemetry coverage)"
-        if util_note:
-            caption += f"  |  {util_note} (fleet reference)"
+        st.caption(
+            f"Signal: {sig_str}  |  {rv.telemetry_coverage_pct:.0%} telemetry coverage  |  "
+            f"storage mode: {l2['storage_mode']}  |  horizon: {l2['ramp_preset']}"
+        )
         for w in rv.warnings:
             st.warning(w)
-    elif util_note:
-        caption = util_note + "  (fleet P95 reference — per-VM rightsizing applied)"
-    else:
-        caption = "No telemetry — rightsizing used benchmark fallback reduction factors."
-    st.caption(caption)
+        if rv.anomaly_vm_count > 0:
+            with st.expander(
+                f"🔍 {rv.anomaly_vm_count} SKU anomal{'y' if rv.anomaly_vm_count == 1 else 'ies'} "
+                "(matched SKU > 2× source vCPU — inspect before approving)"
+            ):
+                import pandas as pd
+                st.dataframe(pd.DataFrame(rv.anomaly_vms[:20]), use_container_width=True)
 
-    st.markdown("#### 💰 Azure Cost Estimate (Y10 run-rate, PAYG list price)")
+    st.markdown("##### Azure Cost Estimate (PAYG list price, Y10 run-rate)")
     m1, m2, m3, m4 = st.columns(4)
-    total_az = plan.annual_compute_consumption_lc_y10 + plan.annual_storage_consumption_lc_y10
-    m1.metric("Compute/yr",  _fmt(plan.annual_compute_consumption_lc_y10))
-    m2.metric("Storage/yr",  _fmt(plan.annual_storage_consumption_lc_y10))
-    m3.metric("Total Azure/yr", _fmt(total_az))
-    src_label = _PRICING_SRC_LABEL.get(result.pricing.source, result.pricing.source.upper())
-    m4.metric("Pricing source", f"{result.region}", delta=src_label, delta_color="off")
+    total_az = cp.annual_compute_consumption_lc_y10 + cp.annual_storage_consumption_lc_y10
+    m1.metric("Compute/yr",     f"${cp.annual_compute_consumption_lc_y10:,.0f}")
+    m2.metric("Storage/yr",     f"${cp.annual_storage_consumption_lc_y10:,.0f}")
+    m3.metric("Total Azure/yr", f"${total_az:,.0f}")
+    src = l1["pricing"].source
+    m4.metric("Pricing source", l1["region"], delta=_PRICING_SRC_LABEL.get(src, src), delta_color="off")
 
-    # Attribution banner — Azure Retail Prices API is the immutable source of truth
-    if result.pricing.source in ("api", "cache"):
+    if src in ("api", "cache"):
         st.info(
-            "**Pricing source: [Azure Retail Prices API](https://prices.azure.com/api/retail/prices)** — "
-            "immutable source of truth for PAYG list rates. "
-            "All \$/vCPU-hr and \$/GB-month figures are fetched live (or from a 24-h local cache) "
-            "and are never hard-coded in this tool.",
+            "**Pricing:** [Azure Retail Prices API](https://prices.azure.com/api/retail/prices) — "
+            "live PAYG list rates, never hard-coded.",
             icon="🔗",
         )
     else:
-        st.warning(
-            "Live pricing unavailable — using benchmark default rates. "
-            "Re-run with internet access to fetch live rates from the "
-            "[Azure Retail Prices API](https://prices.azure.com/api/retail/prices).",
-            icon="⚠️",
+        st.warning("Offline mode — benchmark default rates. Reconnect to fetch live prices.", icon="⚠️")
+
+def _render_l2_override() -> None:
+    l2 = st.session_state["_l2_result"]
+    bm = l2["bm"]
+    with st.expander("⚙️ Override rightsizing parameters & re-run", expanded=False):
+        c1, c2 = st.columns(2)
+        new_ramp = c1.selectbox(
+            "Migration horizon",
+            _RAMP_OPTIONS,
+            index=_RAMP_OPTIONS.index(l2["ramp_preset"]),
+            key="_l2ov_ramp",
+        )
+        new_storage_sel = c2.radio(
+            "Storage mode",
+            ["Per-VM disk tiers (accurate)", "Fleet aggregate (fast)"],
+            index=0 if l2["storage_mode"] == "per_vm" else 1,
+            horizontal=True,
+            key="_l2ov_storage",
         )
 
-    # Compute caption: fleet-level vCPU pricing (reference SKU gives $/vCPU-hr)
-    compute_note = (
-        f"Compute: {result.pricing.vm_sku} @ {result.pricing.price_per_vcpu_hour_display} "
-        f"× {plan.azure_vcpu:,} fleet vCPUs (fleet-level rate, not per-VM SKU match)"
+        st.markdown("**Headroom and fallback factors**")
+        st.caption(
+            "Headroom adds buffer on top of measured utilisation. "
+            "Fallback factors apply only to VMs with no telemetry signal."
+        )
+        h1, h2, h3, h4 = st.columns(4)
+        cpu_head = h1.slider(
+            "CPU headroom %", 0, 50,
+            int(bm.cpu_rightsizing_headroom_factor * 100), 5,
+            key="_l2ov_cpu_head",
+        ) / 100
+        mem_head = h2.slider(
+            "Mem headroom %", 0, 50,
+            int(bm.memory_rightsizing_headroom_factor * 100), 5,
+            key="_l2ov_mem_head",
+        ) / 100
+        cpu_fb = h3.slider(
+            "CPU fallback %", 10, 80,
+            int(bm.cpu_util_fallback_factor * 100), 5,
+            key="_l2ov_cpu_fb",
+        ) / 100
+        mem_fb = h4.slider(
+            "Mem fallback %", 10, 80,
+            int(bm.mem_util_fallback_factor * 100), 5,
+            key="_l2ov_mem_fb",
+        ) / 100
+
+        if st.button("↺ Re-run Rightsizing with these settings", key="_rerun_l2"):
+            bm_new = BenchmarkConfig(**{
+                **bm.model_dump(),
+                "cpu_rightsizing_headroom_factor":    cpu_head,
+                "memory_rightsizing_headroom_factor": mem_head,
+                "cpu_util_fallback_factor":           cpu_fb,
+                "mem_util_fallback_factor":           mem_fb,
+            })
+            smode  = "per_vm" if "Per-VM" in new_storage_sel else "aggregate"
+            result = _run_layer2(new_ramp, smode, bm_new)
+            if result:
+                _clear_from(3)
+                st.session_state["_l2_result"] = result
+                st.session_state["benchmarks"]  = bm_new
+                st.rerun()
+
+# ─── Layer 3 — Financial Model ────────────────────────────────────────────────
+
+def _build_l3_inputs(
+    aco_by_year:  list[float],
+    ecif_by_year: list[float],
+    num_dc_exit:  int,
+):
+    from engine.models import (
+        BusinessCaseInputs, DatacenterConfig, EngagementInfo, HardwareLifecycle,
     )
-    # Storage caption depends on mode
-    smode = getattr(result, "storage_mode", "aggregate")
-    if smode == "per_vm":
-        storage_note = f"Storage: per-disk tier assignment (managed disks mapped individually)"
-    else:
-        storage_note = (
-            f"Storage: fleet aggregate — {result.pricing.disk_sku} "
-            f"@ {result.pricing.price_per_gb_month_display} blended rate"
-        )
-    st.caption(f"{compute_note}  |  {storage_note}")
+    l1 = st.session_state["_l1_result"]
+    l2 = st.session_state["_l2_result"]
 
+    def _pad10(v: list[float]) -> list[float]:
+        out = list(v)[:10]
+        while len(out) < 10:
+            out.append(0.0)
+        return out
 
-def _results_kpi_preview(result, horizon: int = 5) -> None:
-    """Run engine and show headline KPIs."""
+    cp = l2["cp"].model_copy(update={
+        "aco_by_year":  _pad10(aco_by_year),
+        "ecif_by_year": _pad10(ecif_by_year),
+    })
+    return BusinessCaseInputs(
+        engagement=EngagementInfo(
+            client_name=l1["client_name"],
+            local_currency_name=l1["currency"],
+            usd_to_local_rate=1.0,
+        ),
+        hardware=HardwareLifecycle(),
+        datacenter=DatacenterConfig(num_datacenters_to_exit=num_dc_exit),
+        workloads=[l2["wl"]],
+        consumption_plans=[cp],
+    )
+
+def _run_layer3(
+    aco_by_year:  list[float],
+    ecif_by_year: list[float],
+    num_dc_exit:  int,
+    bm:           BenchmarkConfig,
+    label:        str = "Base",
+) -> dict | None:
     from engine import status_quo, retained_costs, depreciation, financial_case, outputs
-    inputs  = result.inputs
-    bm      = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
 
-    with st.spinner("Calculating business case…"):
-        sq      = status_quo.compute(inputs, bm)
-        depr    = depreciation.compute(inputs, bm)
-        ret     = retained_costs.compute(inputs, bm, sq)
-        fc      = financial_case.compute(inputs, bm, sq, ret, depr)
-        summary = outputs.compute(inputs, bm, fc)
+    try:
+        inputs = _build_l3_inputs(aco_by_year, ecif_by_year, num_dc_exit)
+        with st.spinner(f"Computing financial model — {label}…"):
+            sq      = status_quo.compute(inputs, bm)
+            depr    = depreciation.compute(inputs, bm)
+            ret     = retained_costs.compute(inputs, bm, sq)
+            fc      = financial_case.compute(inputs, bm, sq, ret, depr)
+            summary = outputs.compute(inputs, bm, fc)
+    except Exception as exc:
+        st.error(f"Layer 3 failed ({label}): {exc}")
+        return None
 
-    pb_str = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else "N/A"
-    st.markdown("#### 📊 Business Case Preview")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    if horizon >= 10:
-        k1.metric("CF NPV (10-Yr)",   _fmt(summary.npv_cf_10yr))
-        k2.metric("P&L NPV (10-Yr)",  _fmt(summary.npv_10yr))
-        k3.metric("5-Yr CF ROI",      f"{summary.roi_cf:.0%}")
+    return {
+        "inputs":      inputs,
+        "fc":          fc,
+        "summary":     summary,
+        "bm":          bm,
+        "aco":         aco_by_year,
+        "ecif":        ecif_by_year,
+        "num_dc_exit": num_dc_exit,
+        "label":       label,
+    }
+
+def _show_layer3(horizon: int = 5) -> None:
+    l3        = st.session_state["_l3_result"]
+    scenarios = st.session_state.get("_l3_scenarios", [])
+    all_sc    = [l3] + scenarios
+    l1        = st.session_state["_l1_result"]
+    cur       = l1.get("currency", "USD")
+    fmt       = lambda v: _fmt(v, cur)  # noqa: E731
+
+    if len(all_sc) > 1:
+        st.markdown("##### Scenario Comparison")
+        cols = st.columns(len(all_sc))
+        for col, sc in zip(cols, all_sc):
+            s   = sc["summary"]
+            pb  = f"{s.payback_cf:.1f} yrs" if s.payback_cf else ">5 yrs"
+            aco = sum(abs(x) for x in sc.get("aco", []))
+            col.subheader(sc["label"])
+            col.metric("5-Yr CF ROI",    f"{s.roi_cf:.0%}")
+            col.metric("Payback (5Y)",   pb)
+            col.metric("CF NPV (5-Yr)",  fmt(s.npv_cf_5yr))
+            col.metric("CF NPV (10-Yr)", fmt(s.npv_cf_10yr))
+            col.metric("Yr-10 Savings",  fmt(s.savings_yr10))
+            if aco > 0:
+                col.metric("ACO Credits", fmt(aco), delta="in base", delta_color="off")
     else:
-        k1.metric("CF NPV (5-Yr)",    _fmt(summary.npv_cf_5yr))
-        k2.metric("P&L NPV (5-Yr)",   _fmt(summary.npv_5yr))
-        k3.metric("5-Yr CF ROI",      f"{summary.roi_cf:.0%}")
-    k4.metric("Payback (5Y CF)",      pb_str)
-    k5.metric("Yr-10 Savings",        _fmt(summary.savings_yr10))
-    k6.metric("5-Yr CF ROI",          f"{summary.roi_cf:.0%}")
+        summary = l3["summary"]
+        pb_str  = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else ">5 yrs"
+        st.markdown("##### Business Case Summary")
+        k1, k2, k3, k4, k5, k6 = st.columns(6)
+        npv_cf = summary.npv_cf_10yr if horizon >= 10 else summary.npv_cf_5yr
+        npv_pl = summary.npv_10yr    if horizon >= 10 else summary.npv_5yr
+        k1.metric(f"CF NPV ({horizon}Y)",  fmt(npv_cf))
+        k2.metric(f"P&L NPV ({horizon}Y)", fmt(npv_pl))
+        k3.metric("5-Yr CF ROI",           f"{summary.roi_cf:.0%}")
+        k4.metric("Payback (5Y CF)",        pb_str)
+        k5.metric("Yr-10 Savings",          fmt(summary.savings_yr10))
+        k6.metric("SQ Cost/VM/yr",          fmt(summary.on_prem_cost_per_vm_yr))
 
-    v1, v2, v3, _ = st.columns([1, 1, 1, 3])
-    v1.metric("On-Prem Cost/VM/yr", _fmt(summary.on_prem_cost_per_vm_yr))
-    v2.metric("Azure Cost/VM/yr",   _fmt(summary.azure_cost_per_vm_yr))
-    v3.metric("Savings/VM/yr",      _fmt(summary.savings_per_vm_yr))
+        v1, v2, v3, _ = st.columns([1, 1, 1, 3])
+        v1.metric("Azure Cost/VM/yr", fmt(summary.azure_cost_per_vm_yr))
+        v2.metric("Savings/VM/yr",    fmt(summary.savings_per_vm_yr))
 
-    # Chart scoped to selected horizon
-    n = horizon
-    years = list(range(1, n + 1))
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        name="Retained CAPEX",    x=years, y=summary.az_cf_capex_by_year[1:n+1],  marker_color="#4A4A6A"))
-    fig.add_trace(go.Bar(
-        name="Retained OPEX",     x=years, y=summary.az_cf_opex_by_year[1:n+1],   marker_color="#C76C00"))
-    fig.add_trace(go.Bar(
-        name="Azure Consumption", x=years, y=summary.az_cf_azure_by_year[1:n+1],  marker_color="#50B0F0"))
+    _chart(l3, horizon, fmt)
+
+def _chart(l3: dict, horizon: int, fmt) -> None:
+    summary = l3["summary"]
+    n       = horizon
+    years   = list(range(1, n + 1))
+    fig     = go.Figure()
+    fig.add_trace(go.Bar(name="Retained CAPEX",    x=years, y=summary.az_cf_capex_by_year[1:n+1],  marker_color="#4A4A6A"))
+    fig.add_trace(go.Bar(name="Retained OPEX",     x=years, y=summary.az_cf_opex_by_year[1:n+1],   marker_color="#C76C00"))
+    fig.add_trace(go.Bar(name="Azure Consumption", x=years, y=summary.az_cf_azure_by_year[1:n+1],  marker_color="#50B0F0"))
     mig = [v if v != 0 else None for v in summary.az_cf_migration_by_year[1:n+1]]
-    fig.add_trace(go.Bar(
-        name="Migration",         x=years, y=mig,                                  marker_color="#FFC107"))
+    fig.add_trace(go.Bar(name="Migration",         x=years, y=mig,                                  marker_color="#FFC107"))
     fig.add_trace(go.Scatter(
         name="On-Prem (SQ)", x=years, y=summary.sq_cf_by_year[1:n+1],
-        mode="lines+markers", line=dict(color="#FF6B35", width=3), marker=dict(size=8)))
-
-    # Average annual CF savings annotation
+        mode="lines+markers", line=dict(color="#FF6B35", width=3), marker=dict(size=8),
+    ))
     cf_savings = summary.annual_cf_savings[1:n+1]
-    avg_saving = sum(cf_savings) / n if n else 0.0
+    avg = sum(cf_savings) / max(n, 1)
     fig.add_hline(
-        y=avg_saving,
-        line_dash="dash",
-        line_color="#22CC88",
-        annotation_text=f"Avg {n}-yr saving: {_fmt(avg_saving)}/yr",
+        y=avg, line_dash="dash", line_color="#22CC88",
+        annotation_text=f"Avg annual saving: {fmt(avg)}",
         annotation_position="top right",
-        annotation_font_size=11,
-        annotation_font_color="#22CC88",
+        annotation_font_size=11, annotation_font_color="#22CC88",
     )
-
     fig.update_layout(
         barmode="stack",
-        title=f"{n}-Year Cost Comparison (avg annual saving: {_fmt(avg_saving)})",
+        title=f"{n}-Year Cost Comparison — {l3['label']}",
         xaxis=dict(title="Year", tickmode="linear", tick0=1, dtick=1),
-        yaxis=dict(title="USD", tickformat="$,.0f"),
+        yaxis=dict(title=l3["inputs"].engagement.local_currency_name, tickformat="$,.0f"),
         legend=dict(
-            orientation="v",
-            x=1.02, xanchor="left",
-            y=1.0,  yanchor="top",
-            font=dict(size=11),
-            bgcolor="rgba(0,0,0,0)",
+            orientation="v", x=1.02, xanchor="left", y=1.0, yanchor="top",
+            font=dict(size=11), bgcolor="rgba(0,0,0,0)",
         ),
         height=360,
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
@@ -309,264 +601,325 @@ def _results_kpi_preview(result, horizon: int = 5) -> None:
     )
     st.plotly_chart(fig, use_container_width=True)
 
-    # Store summary in session state for Results page to re-use
-    st.session_state["_agent_summary"] = summary
+def _render_l3_override() -> None:
+    l3        = st.session_state["_l3_result"]
+    scenarios = st.session_state.get("_l3_scenarios", [])
+    bm        = l3["bm"]
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main render
-# ─────────────────────────────────────────────────────────────────────────────
-
-def render() -> None:
-    st.title("⚡ Agent Intake — Automated Business Case")
-    st.caption(
-        "Upload an RVTools export (.xlsx). The engine automatically parses your inventory, "
-        "infers the Azure region, fetches live PAYG pricing, right-sizes to Azure, "
-        "and builds the full business case — no manual number entry required."
-    )
-    # Reduce default metric font sizes for a denser layout
-    st.markdown(_METRIC_CSS, unsafe_allow_html=True)
-
-    bm = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
-
-    # ── STAGE 0: Input form ───────────────────────────────────────────────────
-    with st.container():
-        col_name, col_cur, col_space = st.columns([2, 1, 3])
-        client_name = col_name.text_input(
-            "Customer Name *",
-            value=st.session_state.get("_agent_client_name", ""),
-            placeholder="e.g. Contoso Corp",
+    with st.expander(
+        "⚙️ Override financial parameters · add comparison scenario",
+        expanded=False,
+    ):
+        c1, c2, c3 = st.columns(3)
+        dc_exit     = c1.number_input(
+            "Datacenters to exit", min_value=0, max_value=10,
+            value=l3["num_dc_exit"], key="_l3ov_dc",
         )
-        currency = col_cur.selectbox(
-            "Currency",
-            _CURRENCIES,
-            index=_CURRENCIES.index(st.session_state.get("_agent_currency", "USD")),
+        wacc_pct    = c2.slider(
+            "WACC (discount rate) %", 3, 15,
+            int(bm.wacc * 100), 1, key="_l3ov_wacc",
+        ) / 100
+        horizon_sel = c3.radio(
+            "Analysis horizon", ["5-Year", "10-Year"],
+            index=0 if st.session_state.get("_agent_horizon", 5) < 10 else 1,
+            horizontal=True, key="_l3ov_horizon",
         )
+        st.session_state["_agent_horizon"] = 5 if "5" in horizon_sel else 10
 
-        sensitivity_confirmed = st.checkbox(
-            "✅ I confirm this RVTools export is classified **General** sensitivity or lower "
-            "and does not contain Confidential, Restricted, or higher-sensitivity data.",
-            key="_sensitivity_cb",
-        )
+        st.markdown("**Microsoft Funding Credits** *(positive = inflow to client)*")
+        cr1, cr2, cr3, cr4, cr5 = st.columns(5)
 
-        if sensitivity_confirmed:
-            uploaded = st.file_uploader(
-                "Upload RVTools Export (.xlsx) *",
-                type=["xlsx"],
-                help="Export from RVTools: File → Export → All to xlsx",
-            )
-        else:
-            uploaded = None
-            st.caption("☑️ Check the box above to enable file upload.")
+        def _aco_disp(i: int) -> float:
+            v = l3.get("aco", [])
+            return abs(v[i]) if len(v) > i else 0.0
 
-    # ── OPTIONAL PARAMETERS (always visible, collapsed by default) ────────────
-    with st.expander("⚙️ Optional Parameters", expanded=False):
-        st.caption("Leave defaults for a quick first pass. Adjust here for more specific scenarios.")
-        opt_c1, opt_c2 = st.columns(2)
+        def _ecif_disp(i: int) -> float:
+            v = l3.get("ecif", [])
+            return abs(v[i]) if len(v) > i else 0.0
 
-        ramp_preset = opt_c1.selectbox(
-            "Migration Horizon",
-            _RAMP_OPTIONS,
-            index=_RAMP_OPTIONS.index("Extended (100% by Y3)"),
-            help="How quickly the estate migrates to Azure.",
-        )
-        dc_exit = opt_c2.number_input(
-            "Datacenters to Exit",
-            min_value=0, max_value=10,
-            value=0,
-            help="Number of on-prem DCs the customer plans to close after migration.",
+        aco_y1  = cr1.number_input("ACO Yr 1",  min_value=0.0, value=_aco_disp(0),  step=10_000.0, format="%.0f", key="_l3ov_a1")
+        aco_y2  = cr2.number_input("ACO Yr 2",  min_value=0.0, value=_aco_disp(1),  step=10_000.0, format="%.0f", key="_l3ov_a2")
+        aco_y3  = cr3.number_input("ACO Yr 3",  min_value=0.0, value=_aco_disp(2),  step=10_000.0, format="%.0f", key="_l3ov_a3")
+        ecif_y1 = cr4.number_input("ECIF Yr 1", min_value=0.0, value=_ecif_disp(0), step=10_000.0, format="%.0f", key="_l3ov_e1")
+        ecif_y2 = cr5.number_input("ECIF Yr 2", min_value=0.0, value=_ecif_disp(1), step=10_000.0, format="%.0f", key="_l3ov_e2")
+
+        aco  = [-aco_y1, -aco_y2, -aco_y3, 0, 0, 0, 0, 0, 0, 0]
+        ecif = [-ecif_y1, -ecif_y2, 0, 0, 0, 0, 0, 0, 0, 0]
+
+        scenario_name = st.text_input(
+            "Scenario label",
+            value=f"Scenario {len(scenarios) + 2:02d}",
+            key="_l3ov_name",
         )
 
-        st.markdown("**Microsoft Funding Credits (optional)**")
-        st.caption(
-            "ACO = Azure Consumption Offer (applied as reduction to migration costs). "
-            "ECIF = Eligible Credit Investment Fund. Enter total amounts by year — leave 0 if not applicable."
-        )
-        fc1, fc2, fc3, fc4, fc5 = st.columns(5)
-        aco_y1  = fc1.number_input("ACO Year 1",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
-        aco_y2  = fc2.number_input("ACO Year 2",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
-        aco_y3  = fc3.number_input("ACO Year 3",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
-        ecif_y1 = fc4.number_input("ECIF Year 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
-        ecif_y2 = fc5.number_input("ECIF Year 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f")
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            if st.button("↺ Update base scenario", key="_rerun_l3_base"):
+                bm_new = BenchmarkConfig(**{**bm.model_dump(), "wacc": wacc_pct})
+                result = _run_layer3(aco, ecif, int(dc_exit), bm_new, label="Base (updated)")
+                if result:
+                    st.session_state["_l3_result"]     = result
+                    st.session_state["_l3_scenarios"]  = []
+                    st.session_state["inputs"]         = result["inputs"]
+                    st.session_state["_agent_summary"] = result["summary"]
+                    st.rerun()
+        with sc2:
+            if st.button(f"➕ Add comparison: {scenario_name}", key="_add_scenario"):
+                bm_new = BenchmarkConfig(**{**bm.model_dump(), "wacc": wacc_pct})
+                result = _run_layer3(aco, ecif, int(dc_exit), bm_new, label=scenario_name)
+                if result:
+                    st.session_state["_l3_scenarios"] = scenarios + [result]
+                    st.rerun()
 
-        st.markdown("**Storage Calculation Mode**")
-        st.caption(
-            "*Per-VM disk tiers* assigns each disk individually to the nearest Azure managed disk tier "
-            "(most accurate for fleets with mixed disk sizes). "
-            "*Fleet aggregate* applies a blended per-GB rate to the total provisioned storage "
-            "(faster, suitable for early-stage estimates)."
-        )
-        _storage_opts = ["Per-VM disk tiers (accurate)", "Fleet aggregate (fast)"]
-        _storage_sel  = st.radio(
-            "Storage mode",
-            _storage_opts,
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        storage_mode = "per_vm" if "Per-VM" in _storage_sel else "aggregate"
-
-        st.markdown("**Analysis Time Horizon**")
-        _horizon_sel = st.radio(
-            "Horizon",
-            ["5-Year", "10-Year"],
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        horizon = 5 if _horizon_sel == "5-Year" else 10
-
-        st.markdown("**vCPU \u2192 pCore Ratio (for license cost derivation)**")
-        _prior_vhost = st.session_state.get("_agent_vhost_ratio", 0.0)
-        _vhost_label = (
-            f"vHost-calculated ({_prior_vhost:.3f}\u00d7)"
-            if _prior_vhost > 0 else "vHost-calculated (run once to see value)"
-        )
-        st.caption(
-            "The benchmark default (1.97\u00d7) is the Template model standard. "
-            "The vHost-calculated average is derived from your RVTools vHost tab after first run."
-        )
-        _ratio_opts = ["Benchmark default (1.97\u00d7)", _vhost_label]
-        _ratio_sel = st.radio(
-            "vCPU/pCore ratio",
-            _ratio_opts,
-            index=0,
-            horizontal=True,
-            label_visibility="collapsed",
-            disabled=_prior_vhost <= 0,
-        )
-        vcpu_ratio_override: float | None = (
-            _prior_vhost if ("vHost" in _ratio_sel and _prior_vhost > 0) else None
-        )
-
-    # ── SUBMIT BUTTON ─────────────────────────────────────────────────────────
-    btn_label = "🔄 Re-analyse" if "_agent_result" in st.session_state else "⚡ Build Business Case"
-    submit_clicked = st.button(btn_label, type="primary", use_container_width=True)
-
-    if submit_clicked:
-        # Validate only on submit — never show errors on first page load
-        _errors: list[str] = []
-        if not client_name.strip():
-            st.error("⚠️ Customer name is required.")
-            _errors.append("name")
-        if not sensitivity_confirmed:
-            st.error("⚠️ Please confirm the file sensitivity classification above before proceeding.")
-            _errors.append("sensitivity")
-        elif uploaded is None:
-            st.error("⚠️ Please upload an RVTools .xlsx export.")
-            _errors.append("file")
-
-        if not _errors:
-            for key in ["_agent_result", "inputs", "_agent_summary"]:
-                st.session_state.pop(key, None)
-
-            st.session_state["_agent_client_name"] = client_name.strip()
-            st.session_state["_agent_currency"]     = currency
-
-            file_bytes = uploaded.read()
-            _pipeline_ok = False
-
-            with st.status("⚡ Building your business case…", expanded=True) as _status:
-                st.write("🔍 Step 1 — Validating file format…")
-
-                if not zipfile.is_zipfile(io.BytesIO(file_bytes)):
-                    _status.update(label="❌ File could not be read", state="error", expanded=True)
-                    st.error(
-                        "🔒 This file cannot be read — it appears to be **encrypted or "
-                        "password-protected**.  \n"
-                        "Encrypted files are often protected by a sensitivity label **above General**.  \n\n"
-                        "To fix: open the file in Excel → **File → Info → Protect Workbook → "
-                        "Encrypt with Password** → remove the password → save → re-upload."
-                    )
-                else:
-                    st.write(
-                        "📊 Step 2 — Parsing inventory · inferring Azure region · "
-                        "fetching live pricing · right-sizing · building financial model…"
-                    )
-                    try:
-                        from engine.rvtools_to_inputs import build_business_case_from_bytes
-                        aco  = [aco_y1, aco_y2, aco_y3,  0, 0, 0, 0, 0, 0, 0]
-                        ecif = [ecif_y1, ecif_y2, 0,      0, 0, 0, 0, 0, 0, 0]
-                        result = build_business_case_from_bytes(
-                            file_bytes=file_bytes,
-                            client_name=client_name.strip(),
-                            currency=currency,
-                            ramp_preset=ramp_preset,
-                            aco_by_year=aco,
-                            ecif_by_year=ecif,
-                            benchmarks=bm,
-                            num_datacenters_to_exit=int(dc_exit),
-                            storage_mode=storage_mode,
-                            vcpu_ratio_override=vcpu_ratio_override,
-                        )
-                        # Persist vHost ratio for next render so user can toggle to it
-                        if result.vcpu_ratio_vhost > 0:
-                            st.session_state["_agent_vhost_ratio"] = result.vcpu_ratio_vhost
-                        st.session_state["_agent_horizon"]  = horizon
-                        st.write(
-                            f"✔ {result.inventory.num_vms:,} VMs parsed · "
-                            f"region: {result.region} · pricing: {result.pricing.source}"
-                        )
-                        st.session_state["_agent_result"] = result
-                        st.session_state["inputs"]        = result.inputs
-                        st.session_state["benchmarks"]    = bm
-                        _pipeline_ok = True
-                        _status.update(
-                            label=(
-                                f"✅ Business case ready — "
-                                f"{result.inventory.num_vms:,} VMs · {result.region}"
-                            ),
-                            state="complete",
-                            expanded=False,
-                        )
-                    except Exception as exc:
-                        try:
-                            from openpyxl.utils.exceptions import InvalidFileException as _IFE
-                        except ImportError:
-                            _IFE = None
-                        _status.update(label="❌ Pipeline failed", state="error", expanded=True)
-                        if isinstance(exc, zipfile.BadZipFile) or (_IFE and isinstance(exc, _IFE)):
-                            st.error(
-                                "🔒 Could not open the file — it may be **encrypted or corrupted**. "
-                                "Save an unprotected copy and re-upload."
-                            )
-                        else:
-                            st.error(f"Pipeline failed: {exc}")
-                            raise
-
-            if _pipeline_ok:
+        if scenarios:
+            if st.button("🗑 Clear comparison scenarios", key="_clear_sc"):
+                st.session_state["_l3_scenarios"] = []
                 st.rerun()
 
-    # ── RESULTS DISPLAY (if result already in session) ────────────────────────
-    if "_agent_result" not in st.session_state:
-        return
+# ─── Upload form (step 0) ─────────────────────────────────────────────────────
 
-    result = st.session_state["_agent_result"]
-
-    st.divider()
-    st.success(
-        f"✅ Business case compiled for **{result.inputs.engagement.client_name}**  |  "
-        f"{result.inventory.num_vms:,} VMs  |  region: **{result.region}**  |  "
-        f"pricing: **{result.pricing.source}**"
+def _render_upload() -> None:
+    c1, c2, _ = st.columns([2, 1, 3])
+    client_name = c1.text_input(
+        "Customer Name *",
+        value=st.session_state.get("_agent_client_name", ""),
+        placeholder="e.g. Contoso Corp",
+    )
+    currency = c2.selectbox(
+        "Currency",
+        _CURRENCIES,
+        index=_CURRENCIES.index(st.session_state.get("_agent_currency", "USD")),
     )
 
-    # Warnings
-    if result.warnings:
-        with st.expander(f"⚠️ {len(result.warnings)} parser warning(s)", expanded=False):
-            for w in result.warnings:
-                st.warning(w)
+    sensitivity_ok = st.checkbox(
+        "✅ I confirm this RVTools export is classified **General** sensitivity or lower "
+        "and does not contain Confidential, Restricted, or higher-sensitivity data.",
+        key="_sensitivity_cb",
+    )
+
+    uploaded = None
+    if sensitivity_ok:
+        uploaded = st.file_uploader(
+            "Upload RVTools Export (.xlsx) *",
+            type=["xlsx"],
+            help="RVTools: File → Export → All to xlsx",
+        )
+    else:
+        st.caption("☑️ Confirm sensitivity classification above to enable file upload.")
+
+    with st.expander("⚙️ Optional: force Azure region", expanded=False):
+        region_override = st.text_input(
+            "Override region",
+            placeholder="e.g. uksouth — leave blank for auto-detection",
+            key="_upload_region_override",
+        )
+
+    if st.button("⚡ Parse Inventory →", type="primary", use_container_width=True):
+        if not client_name.strip():
+            st.error("⚠️ Customer name is required.")
+            return
+        if not sensitivity_ok:
+            st.error("⚠️ Confirm the sensitivity classification above.")
+            return
+        if uploaded is None:
+            st.error("⚠️ Upload an RVTools .xlsx export.")
+            return
+
+        file_bytes = uploaded.read()
+        _clear_from(1)
+        st.session_state["_wiz_file_bytes"]    = file_bytes
+        st.session_state["_agent_client_name"] = client_name.strip()
+        st.session_state["_agent_currency"]    = currency
+
+        result = _run_layer1(file_bytes, client_name.strip(), currency, region_override)
+        if result:
+            st.session_state["_l1_result"] = result
+            _set_step(1)
+            st.rerun()
+
+# ─── Layer checkpoint pages ──────────────────────────────────────────────────
+
+def _render_l1_checkpoint() -> None:
+    bm = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
+
+    st.subheader("📋 Layer 1 — Inventory Review")
+    st.caption(
+        "Review the parsed fleet inventory, OS/license profile, and inferred Azure region. "
+        "Use the override panel to change any parameter and re-run. "
+        "Pre-select rightsizing settings, then approve to proceed."
+    )
+
+    _show_layer1()
+    _render_l1_override()
 
     st.divider()
-    _inv_summary_card(result)
-    st.divider()
-    _rightsizing_card(result)
-    st.divider()
-    _results_kpi_preview(result, horizon=st.session_state.get("_agent_horizon", 5))
+    st.markdown("**Pre-flight settings for Rightsizing →**")
+    pf1, pf2 = st.columns(2)
+    ramp = pf1.selectbox(
+        "Migration horizon",
+        _RAMP_OPTIONS,
+        index=_RAMP_OPTIONS.index("Extended (100% by Y3)"),
+        key="_pf_ramp",
+    )
+    storage_sel = pf2.radio(
+        "Storage costing mode",
+        ["Per-VM disk tiers (accurate)", "Fleet aggregate (fast)"],
+        index=0, horizontal=True, key="_pf_storage",
+    )
+
+    if st.button(
+        "✅ Approve Inventory — Run Rightsizing →",
+        type="primary", use_container_width=True, key="_approve_l1",
+    ):
+        smode  = "per_vm" if "Per-VM" in storage_sel else "aggregate"
+        result = _run_layer2(ramp, smode, bm)
+        if result:
+            st.session_state["_l2_result"] = result
+            _set_step(2)
+            st.rerun()
+
+
+def _render_l2_checkpoint() -> None:
+    bm = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
+
+    st.subheader("⚙️ Layer 2 — Rightsizing Review")
+    st.caption(
+        "Review per-VM rightsizing results and the Layer 1 → Layer 2 validation checkpoint. "
+        "Check the anomaly list and telemetry coverage. "
+        "Adjust headroom/fallback factors via the override panel if needed. "
+        "Enter funding credits, select analysis horizon, then approve."
+    )
+
+    _show_layer2()
+    _render_l2_override()
 
     st.divider()
+    st.markdown("**Pre-flight settings for Financial Model →**")
+    pf1, pf2 = st.columns(2)
+    dc_exit     = pf1.number_input(
+        "Datacenters to exit",
+        min_value=0, max_value=10, value=0, key="_pf_dc_exit",
+    )
+    horizon_sel = pf2.radio(
+        "Analysis horizon",
+        ["5-Year", "10-Year"],
+        index=0, horizontal=True, key="_pf_horizon_sel",
+    )
+    st.session_state["_agent_horizon"] = 5 if "5" in horizon_sel else 10
+
+    st.markdown("**Microsoft Funding Credits** *(optional — leave 0 if not applicable)*")
+    fc1, fc2, fc3, fc4, fc5 = st.columns(5)
+    aco_y1  = fc1.number_input("ACO Yr 1",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key="_pf_a1")
+    aco_y2  = fc2.number_input("ACO Yr 2",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key="_pf_a2")
+    aco_y3  = fc3.number_input("ACO Yr 3",  min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key="_pf_a3")
+    ecif_y1 = fc4.number_input("ECIF Yr 1", min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key="_pf_e1")
+    ecif_y2 = fc5.number_input("ECIF Yr 2", min_value=0.0, value=0.0, step=10_000.0, format="%.0f", key="_pf_e2")
+
+    if st.button(
+        "✅ Approve Rightsizing — Build Financial Model →",
+        type="primary", use_container_width=True, key="_approve_l2",
+    ):
+        aco    = [-aco_y1, -aco_y2, -aco_y3, 0, 0, 0, 0, 0, 0, 0]
+        ecif   = [-ecif_y1, -ecif_y2, 0, 0, 0, 0, 0, 0, 0, 0]
+        result = _run_layer3(aco, ecif, int(dc_exit), bm, label="Base")
+        if result:
+            _clear_from(3)
+            st.session_state["_l3_result"]     = result
+            st.session_state["_l3_scenarios"]  = []
+            st.session_state["inputs"]         = result["inputs"]
+            st.session_state["_agent_summary"] = result["summary"]
+            _set_step(3)
+            st.rerun()
+
+
+def _render_l3_checkpoint() -> None:
+    horizon = st.session_state.get("_agent_horizon", 5)
+
+    st.subheader("📊 Layer 3 — Financial Model Review")
+    st.caption(
+        "Review the business case output. "
+        "Use the override panel to test different WACC, funding credits, or DC-exit scenarios. "
+        "Add named comparison scenarios to compare assumptions side-by-side. "
+        "Approve to proceed to export."
+    )
+
+    _show_layer3(horizon=horizon)
+    _render_l3_override()
+
+    st.divider()
+    if st.button(
+        "✅ Approve Business Case — Proceed to Export →",
+        type="primary", use_container_width=True, key="_approve_l3",
+    ):
+        _set_step(4)
+        st.rerun()
+
+
+def _render_export() -> None:
+    st.subheader("📥 Ready for Export")
+    l3      = st.session_state.get("_l3_result", {})
+    summary = l3.get("summary")
+    l1      = st.session_state.get("_l1_result", {})
+    cur     = l1.get("currency", "USD")
+
+    if summary:
+        pb = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else ">5 yrs"
+        st.success(
+            f"📊 **{l1.get('client_name', 'Client')}** — "
+            f"5-Yr CF ROI: **{summary.roi_cf:.0%}** · Payback: **{pb}** · "
+            f"CF NPV (5Y): **{_fmt(summary.npv_cf_5yr, cur)}**"
+        )
+
     st.info(
-        "**Business case is ready.** Click **'4 · Results'** in the sidebar for the full "
-        "interactive analysis, charts, and fact-check.  "
-        "Click **'5 · Export'** to download the PowerPoint deck or pre-filled Excel workbook.  \n"
-        "To override any benchmark assumption, use **'3 · Benchmarks'** and then re-run this page."
+        "**'4 · Results'** in the sidebar → full interactive analysis, deep-dive charts, "
+        "waterfall, and engineering fact-check.  \n"
+        "**'5 · Export'** → PowerPoint board deck or pre-filled Excel workbook.",
+        icon="💡",
     )
+
+# ─── Main render ─────────────────────────────────────────────────────────────
+
+def render() -> None:
+    st.title("⚡ Agent Intake — Layered Business Case Builder")
+    st.caption(
+        "Three-layer checkpoint workflow: "
+        "**Inventory → Rightsizing → Financial Model**. "
+        "Review and approve each layer before proceeding. "
+        "Override and re-run any layer independently without losing other results."
+    )
+    st.markdown(_METRIC_CSS, unsafe_allow_html=True)
+
+    step = _step()
+    _step_bar()
+
+    # Approved-layer compact summaries shown above the active layer
+    if step > 1:
+        _l1_banner()
+    if step > 2:
+        _l2_banner()
+    if step > 3:
+        _l3_banner()
+
+    # Start-over escape hatch (shown once any layer has run)
+    if step > 0:
+        with st.expander("🔄 Start over (re-upload a different file)", expanded=False):
+            st.caption("Clears all results and returns to the upload form.")
+            if st.button("⬅ Start Over", key="_start_over"):
+                for k in list(st.session_state.keys()):
+                    if k.startswith("_"):
+                        st.session_state.pop(k, None)
+                st.rerun()
+
+    st.divider()
+
+    # Dispatch to the active layer
+    if step == 0:
+        _render_upload()
+    elif step == 1:
+        _render_l1_checkpoint()
+    elif step == 2:
+        _render_l2_checkpoint()
+    elif step == 3:
+        _render_l3_checkpoint()
+    else:
+        _render_export()

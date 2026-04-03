@@ -1,0 +1,17 @@
+[server]
+# Allow CORS for embedding and cross-origin access (safe for internal tools)
+enableCORS = false
+# Max upload size in MB — RVTools exports are typically 5-30 MB
+maxUploadSize = 100
+
+[browser]
+# Disable Streamlit's "Manage app" button in deployed mode
+gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor       = "#50B0F0"
+backgroundColor    = "#0E1117"
+secondaryBackgroundColor = "#1A1D24"
+textColor          = "#FAFAFA"
+font               = "sans serif"

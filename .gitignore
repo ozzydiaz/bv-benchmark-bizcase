@@ -11,7 +11,8 @@ venv/
 .coverage
 
 # Streamlit
-.streamlit/
+# Track Streamlit config but not secrets
+.streamlit/secrets.toml
 
 # OS
 .DS_Store
