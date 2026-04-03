@@ -159,13 +159,31 @@ def _rightsizing_card(result) -> None:
 
     util_note = ""
     if inv.cpu_util_p95 > 0:
-        util_note = f"CPU P95 utilisation: {inv.cpu_util_p95:.0%}"
+        util_note = f"Fleet CPU P95: {inv.cpu_util_p95:.0%}"
     if inv.memory_util_p95 > 0:
         util_note += f"  |  Memory P95: {inv.memory_util_p95:.0%}"
-    if util_note:
-        st.caption(util_note + "  (right-sizing based on actual telemetry from vCPU/vMemory tabs)")
+
+    rv = getattr(result, "rightsizing_validation", None)
+    if rv is not None:
+        tele_pct = rv.telemetry_coverage_pct
+        parts = []
+        if rv.telemetry_vm_count:
+            parts.append(f"{rv.telemetry_vm_count} VM telemetry")
+        if rv.host_proxy_vm_count:
+            parts.append(f"{rv.host_proxy_vm_count} host proxy")
+        if rv.fallback_vm_count:
+            parts.append(f"{rv.fallback_vm_count} fallback")
+        sig_str = " + ".join(parts) if parts else "fallback only"
+        caption = f"Per-VM rightsizing signal: {sig_str}  ({tele_pct:.0%} telemetry coverage)"
+        if util_note:
+            caption += f"  |  {util_note} (fleet reference)"
+        for w in rv.warnings:
+            st.warning(w)
+    elif util_note:
+        caption = util_note + "  (fleet P95 reference — per-VM rightsizing applied)"
     else:
-        st.caption("Telemetry unavailable — right-sizing used benchmark fallback reduction factors.")
+        caption = "No telemetry — rightsizing used benchmark fallback reduction factors."
+    st.caption(caption)
 
     st.markdown("#### 💰 Azure Cost Estimate (Y10 run-rate, PAYG list price)")
     m1, m2, m3, m4 = st.columns(4)
@@ -223,20 +241,20 @@ def _results_kpi_preview(result, horizon: int = 5) -> None:
         fc      = financial_case.compute(inputs, bm, sq, ret, depr)
         summary = outputs.compute(inputs, bm, fc)
 
-    pb_str = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "N/A"
+    pb_str = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else "N/A"
     st.markdown("#### 📊 Business Case Preview")
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     if horizon >= 10:
         k1.metric("CF NPV (10-Yr)",   _fmt(summary.npv_cf_10yr))
         k2.metric("P&L NPV (10-Yr)",  _fmt(summary.npv_10yr))
-        k3.metric("10-Year ROI",       f"{summary.roi_10yr:.0%}")
+        k3.metric("5-Yr CF ROI",      f"{summary.roi_cf:.0%}")
     else:
         k1.metric("CF NPV (5-Yr)",    _fmt(summary.npv_cf_5yr))
         k2.metric("P&L NPV (5-Yr)",   _fmt(summary.npv_5yr))
-        k3.metric("5-Year ROI",        f"{summary.roi_5yr:.0%}")
-    k4.metric("Payback",              pb_str)
+        k3.metric("5-Yr CF ROI",      f"{summary.roi_cf:.0%}")
+    k4.metric("Payback (5Y CF)",      pb_str)
     k5.metric("Yr-10 Savings",        _fmt(summary.savings_yr10))
-    k6.metric("10-Yr ROI",            f"{summary.roi_10yr:.0%}")
+    k6.metric("5-Yr CF ROI",          f"{summary.roi_cf:.0%}")
 
     v1, v2, v3, _ = st.columns([1, 1, 1, 3])
     v1.metric("On-Prem Cost/VM/yr", _fmt(summary.on_prem_cost_per_vm_yr))

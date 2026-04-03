@@ -237,6 +237,7 @@ class RVToolsInventory:
 
     # Metadata
     source_file: str = ""
+    source_type: str = "rvtools"   # inventory source format identifier
     parse_warnings: list[str] = field(default_factory=list)
 
 

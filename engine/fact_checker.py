@@ -25,8 +25,12 @@ import openpyxl
 
 from engine.models import BusinessCaseInputs, BenchmarkConfig
 from engine import status_quo, retained_costs, depreciation, financial_case, outputs
+from engine.outputs import compute_cf_roi_and_payback
 from engine.productivity import compute as compute_productivity
 from engine.net_interest_income import compute as compute_nii
+
+# Backward-compatible alias so existing imports from engine.fact_checker still work
+_compute_cf_roi_and_payback = compute_cf_roi_and_payback
 
 
 # ---------------------------------------------------------------------------
@@ -285,86 +289,6 @@ def _compare_inputs(
 
 
 # ---------------------------------------------------------------------------
-# CF-based ROI and payback (mirrors '5Y CF with Payback' sheet)
-# ---------------------------------------------------------------------------
-
-def _compute_cf_roi_and_payback(
-    fc: "financial_case.FinancialCase",
-    benchmarks: BenchmarkConfig,
-) -> tuple[float, float]:
-    """
-    Replicate the '5Y CF with Payback' sheet formulas for ROI (I31) and
-    payback (I32).
-
-    The Template separates one-time migration investment from ongoing P&L
-    savings and asks: how quickly do the recurring savings recover the
-    up-front migration spend?
-
-    Mapping to Template cells:
-        C40 (Investment NPV)  = NPV of net migration costs over Y1–Y5
-        G46 (Cumulative run)  = running sum of discounted ongoing P&L savings
-        I31 (ROI)             = -(G46 + C40) / C40
-        I32 (Payback)         = SUM(C47:G47)  ← interpolated payback year
-
-    Returns (roi, payback_years).
-    ``payback_years`` is 0.0 when payback is not achieved within 5 years
-    (the Template would show "More than 5 years" and SUM → 0).
-    """
-    wacc = benchmarks.wacc
-    sq_pl = fc.sq_total()          # P&L (depreciation-based) SQ costs
-    az_pl = fc.az_total()          # Azure P&L total (includes migration)
-    mig   = fc.az_migration_cf()   # net one-time migration costs, positive = cost
-
-    # C40: one-time investment NPV = discounted migration costs Y1–Y5 (positive magnitude)
-    investment_npv = sum(
-        mig[yr] / (1 + wacc) ** yr
-        for yr in range(1, min(6, len(mig)))
-    )
-
-    if investment_npv <= 0:
-        # No one-time investment → ROI undefined, payback is immediate
-        return 0.0, 0.0
-
-    # Ongoing run savings = SQ P&L cost − Azure ongoing P&L (migration excluded)
-    # Mirrors DFC rows 78+79 (SQ infra + admin) − same rows (Azure side)
-    # plus row 80 (Azure run costs = Azure consumption − 0 for SQ)
-    run_savings = [
-        sq_pl[yr] - (az_pl[yr] - mig[yr])
-        for yr in range(len(sq_pl))
-    ]
-
-    # Build C46…G46: cumulative discounted run savings through Y1…Y5
-    cumulative: list[float] = []
-    cum = 0.0
-    for yr in range(1, 6):
-        if yr < len(run_savings):
-            cum += run_savings[yr] / (1 + wacc) ** yr
-        cumulative.append(cum)
-
-    # G46 = cumulative through Y5
-    g46 = cumulative[4] if len(cumulative) >= 5 else (cumulative[-1] if cumulative else 0.0)
-
-    # I31: ROI = -(G46 + C40) / C40  where C40 = −investment_npv in the sheet
-    # Equivalent: (g46 − investment_npv) / investment_npv
-    roi = (g46 - investment_npv) / investment_npv
-
-    # I32: payback = SUM(C47:G47) — fractional year when cumulative >= investment_npv
-    payback = 0.0
-    prev_cum = 0.0
-    for yr_idx, cum_yr in enumerate(cumulative):
-        yr = yr_idx + 1          # 1-based year label (C4=1, D4=2, …)
-        if cum_yr >= investment_npv:
-            delta = cum_yr - prev_cum
-            frac = (investment_npv - prev_cum) / delta if delta > 0 else 0.0
-            payback = (yr - 1) + frac   # fractional years from projection start
-            break
-        prev_cum = cum_yr
-    # payback == 0.0 → not achieved within 5 years (Template: "More than 5 years")
-
-    return roi, payback
-
-
-# ---------------------------------------------------------------------------
 # Main fact-check runner
 # ---------------------------------------------------------------------------
 
@@ -425,7 +349,7 @@ def run(
     # '5Y CF with Payback' sheet (I31 and I32) — one-time migration
     # investment vs ongoing P&L savings — NOT the 10Y P&L multi on
     # total Azure costs stored in summary.roi_10yr.
-    cf_roi, cf_payback = _compute_cf_roi_and_payback(fc, benchmarks)
+    cf_roi, cf_payback = compute_cf_roi_and_payback(fc, benchmarks)
 
     engine_vals: dict[str, float] = {
         "project_npv_10yr":     summary.npv_10yr_with_terminal_value,

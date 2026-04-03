@@ -193,13 +193,13 @@ def render():
     # ----------------------------------------------------------------
     with tab_exec:
         # KPI cards (cashflow-primary)
-        pb_str = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "N/A"
+        pb_str = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else "N/A"
         k1, k2, k3, k4, k5, k6 = st.columns(6)
         k1.metric("CF NPV 10-Year",  f"${summary.npv_cf_10yr:,.0f}")
         k2.metric("CF NPV 5-Year",   f"${summary.npv_cf_5yr:,.0f}")
         k3.metric("P&L NPV 10-Year", f"${summary.npv_10yr:,.0f}")
-        k4.metric("10-Year ROI",     f"{summary.roi_10yr:.0%}")
-        k5.metric("Payback",         pb_str)
+        k4.metric("5-Yr CF ROI",     f"{summary.roi_cf:.0%}")
+        k5.metric("Payback (5Y CF)", pb_str)
         k6.metric("Yr-10 Savings",   f"${summary.savings_yr10:,.0f}")
 
         st.divider()
@@ -440,7 +440,7 @@ def render():
     # TAB 5 — PRESENTATION VIEW
     # ----------------------------------------------------------------
     with tab_pres:
-        pb_str = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "N/A"
+        pb_str = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else "N/A"
 
         # Full-width title block — clean, no Step nav chrome
         st.markdown(
@@ -456,9 +456,9 @@ def render():
         p1.metric("CF NPV (10-Yr)",   f"${summary.npv_cf_10yr:,.0f}")
         p2.metric("CF NPV (5-Yr)",    f"${summary.npv_cf_5yr:,.0f}")
         p3.metric("P&L NPV (10-Yr)",  f"${summary.npv_10yr:,.0f}")
-        p4.metric("10-Year ROI",       f"{summary.roi_10yr:.0%}")
-        p5.metric("Payback",           pb_str)
-        p6.metric("Yr-10 Savings",     f"${summary.savings_yr10:,.0f}")
+        p4.metric("5-Yr CF ROI",      f"{summary.roi_cf:.0%}")
+        p5.metric("Payback (5Y CF)",  pb_str)
+        p6.metric("Yr-10 Savings",    f"${summary.savings_yr10:,.0f}")
 
         # Row 2 — cost per VM
         v1, v2, v3, _ = st.columns([1, 1, 1, 3])

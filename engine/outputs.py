@@ -94,6 +94,71 @@ class BusinessCaseSummary:
     total_sq_cf_5yr: float = 0.0
     total_az_cf_5yr: float = 0.0
 
+    # 5Y CF-based ROI/payback — matches Template '5Y CF with Payback' sheet (I31, I32)
+    # Use these for the primary displayed ROI/payback metrics; roi_10yr is informational only.
+    roi_cf: float = 0.0
+    payback_cf: float | None = None
+
+
+def compute_cf_roi_and_payback(
+    fc: FinancialCase,
+    benchmarks: BenchmarkConfig,
+) -> tuple[float, float]:
+    """
+    Replicate the '5Y CF with Payback' sheet formulas for ROI (I31) and
+    payback (I32).
+
+    The Template separates one-time migration investment from ongoing P&L
+    savings and asks: how quickly do the recurring savings recover the
+    up-front migration spend?
+
+    Returns (roi, payback_years) where payback_years == 0.0 means payback
+    not achieved within 5 years (Template: "More than 5 years").
+    """
+    wacc   = benchmarks.wacc
+    sq_pl  = fc.sq_total()
+    az_pl  = fc.az_total()
+    mig    = fc.az_migration_cf()
+
+    # C40: NPV of one-time migration investment (positive magnitude)
+    investment_npv = sum(
+        mig[yr] / (1 + wacc) ** yr
+        for yr in range(1, min(6, len(mig)))
+    )
+    if investment_npv <= 0:
+        return 0.0, 0.0
+
+    # Ongoing run savings = SQ P&L cost − Azure ongoing P&L (migration excluded)
+    run_savings = [
+        sq_pl[yr] - (az_pl[yr] - mig[yr])
+        for yr in range(len(sq_pl))
+    ]
+
+    # C46…G46: cumulative discounted run savings through Y1…Y5
+    cumulative: list[float] = []
+    cum = 0.0
+    for yr in range(1, 6):
+        if yr < len(run_savings):
+            cum += run_savings[yr] / (1 + wacc) ** yr
+        cumulative.append(cum)
+
+    g46 = cumulative[4] if len(cumulative) >= 5 else (cumulative[-1] if cumulative else 0.0)
+    roi = (g46 - investment_npv) / investment_npv
+
+    # I32: fractional payback year
+    payback = 0.0
+    prev_cum = 0.0
+    for yr_idx, cum_yr in enumerate(cumulative):
+        yr = yr_idx + 1
+        if cum_yr >= investment_npv:
+            delta = cum_yr - prev_cum
+            frac  = (investment_npv - prev_cum) / delta if delta > 0 else 0.0
+            payback = (yr - 1) + frac
+            break
+        prev_cum = cum_yr
+
+    return roi, payback
+
 
 def _npv(cash_flows: list[float], wacc: float, years: int = YEARS) -> float:
     """Compute NPV of a cash flow series (index 0 = Y0, discounted from Y1)."""
@@ -245,6 +310,11 @@ def compute(
     summary.total_az_cf_10yr = sum(fc.az_total_cf()[1:])
     summary.total_sq_cf_5yr = sum(fc.sq_total_cf()[1:6])
     summary.total_az_cf_5yr = sum(fc.az_total_cf()[1:6])
+
+    # 5Y CF-based ROI/payback (matches Template '5Y CF with Payback' sheet)
+    _roi_cf, _payback_cf = compute_cf_roi_and_payback(fc, benchmarks)
+    summary.roi_cf = _roi_cf
+    summary.payback_cf = _payback_cf if _payback_cf > 0 else None
 
     return summary
 

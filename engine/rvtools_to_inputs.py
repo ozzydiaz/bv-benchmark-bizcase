@@ -26,7 +26,7 @@ from pathlib import Path
 from engine.rvtools_parser import RVToolsInventory, parse as _parse_rv
 from engine.region_guesser import guess as _guess_region
 from engine.azure_sku_matcher import get_pricing as _get_pricing, get_vm_catalog as _get_vm_catalog, AzurePricing
-from engine.consumption_builder import build as _build_cp
+from engine.consumption_builder import build_with_validation as _build_cp_with_validation, RightsizingValidation
 from engine.models import (
     BenchmarkConfig,
     BusinessCaseInputs,
@@ -124,6 +124,7 @@ class PipelineResult:
     region: str
     workload: WorkloadInventory
     plan: ConsumptionPlan
+    rightsizing_validation: RightsizingValidation | None = None
     storage_mode: str = "per_vm"   # "per_vm" | "aggregate" — resolved mode used for cost calc
     vcpu_ratio_used: float = 1.97  # ratio applied for pCore derivation
     vcpu_ratio_vhost: float = 0.0  # vHost-calculated average (0 = vHost tab absent)
@@ -261,7 +262,7 @@ def build_business_case(
     _aco  = _pad10(aco_by_year  or [0.0])
     _ecif = _pad10(ecif_by_year or [0.0])
 
-    cp = _build_cp(
+    cp, rs_validation = _build_cp_with_validation(
         inv=inv,
         pricing=pricing,
         benchmarks=benchmarks,
@@ -303,6 +304,7 @@ def build_business_case(
         region=region,
         workload=wl,
         plan=cp,
+        rightsizing_validation=rs_validation,
         storage_mode=storage_mode,
         vcpu_ratio_used=vcpu_ratio_for_wl,
         vcpu_ratio_vhost=_vhost_ratio,

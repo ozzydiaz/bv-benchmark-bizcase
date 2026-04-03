@@ -3,16 +3,21 @@ Consumption plan builder — per-VM rightsizing engine.
 
 For each powered-on VM in the RVToolsInventory:
   1. Resolve utilisation signal (vCPU/vMemory telemetry → vHost proxy → fallback factors).
-  2. Rightsize to (target_vcpu, target_mem_gib) with headroom.
+  2. Rightsize to (target_vcpu, target_mem_gib) with headroom + 0.95 util cap.
   3. Select Azure family (D/E/F/M) based on memory density and workload keywords.
   4. Match least-cost Azure SKU from the pre-fetched VM catalog.
   5. Price: sku.price_per_hour_usd × 8760 hrs.
 
-Storage (per VM, priority order):
-  1. vDisk tab — per-disk Capacity MiB (GiB = MiB ÷ 1024) → assign_cheapest()
-  2. vPartition tab — Consumed MiB summed per VM (GiB)
-  3. vInfo — In Use MiB (GiB)
-  4. vInfo — Provisioned MiB × (1 − storage_prov_reduction_factor) (GiB)
+Storage (per VM, priority order — in-use preferred over provisioned):
+  1. vPartition tab  — Consumed MiB per VM (GiB)    guest OS consumed view
+  2. vInfo           — In Use MiB (GiB)              hypervisor in-use view
+  3. vDisk tab       — Capacity MiB × (1 − reduction) provisional with headroom
+  4. vInfo           — Provisioned MiB × (1 − reduction)  last resort
+
+Rationale for in-use priority: Azure managed disks are provisioned to the
+*needed* capacity, not the VMware-allocated size.  On-prem disks are often
+significantly over-allocated (2–5×); using provisioned sizes inflates Azure
+storage cost by the same factor.  Use actual data size as the target.
 
 All costs in USD, converted to local currency via usd_to_local.
 ACD (Azure Consumption Discount) is applied in Step 2 of the financial model,
@@ -23,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 _log = logging.getLogger(__name__)
@@ -40,6 +46,61 @@ if TYPE_CHECKING:
     from engine.azure_sku_matcher import AzurePricing, VMSku
 
 
+# ---------------------------------------------------------------------------
+# Layer 1 → Layer 2 checkpoint: rightsizing validation
+# ---------------------------------------------------------------------------
+
+@dataclass
+class RightsizingValidation:
+    """
+    Checkpoint object produced at the end of the Rightsizing layer (Layer 2).
+    Exposed in PipelineResult so the UI and callers can inspect quality signals
+    before trusting the ConsumptionPlan flowing into the Financial Model (Layer 3).
+    """
+    # Source fleet (on-prem, powered-on scope)
+    on_prem_vcpu: int = 0
+    on_prem_memory_gb: float = 0.0
+    on_prem_vm_count: int = 0
+
+    # Rightsized Azure target totals
+    azure_vcpu: int = 0
+    azure_memory_gb: float = 0.0
+
+    # Utilisation signal breakdown
+    telemetry_vm_count: int = 0    # per-VM vCPU/vMemory telemetry used
+    host_proxy_vm_count: int = 0   # vHost CPU/memory usage used as proxy
+    fallback_vm_count: int = 0     # assumption reduction factors applied
+
+    # Anomaly detection: VMs where the matched Azure SKU vCPU exceeds
+    # the source VM's vCPU by more than 2× (likely a family snap-up artefact)
+    anomaly_vm_count: int = 0
+    anomaly_vms: list[dict] = field(default_factory=list)  # top anomalies for display
+
+    # Validation flags
+    vcpu_increased: bool = False      # azure_vcpu > on_prem_vcpu
+    memory_increased: bool = False    # azure_memory_gb > on_prem_memory_gb * 1.25
+    warnings: list[str] = field(default_factory=list)
+
+    @property
+    def telemetry_coverage_pct(self) -> float:
+        """Fraction of VMs with any telemetry (vm or host proxy)."""
+        total = max(self.on_prem_vm_count, 1)
+        return (self.telemetry_vm_count + self.host_proxy_vm_count) / total
+
+    @property
+    def vcpu_reduction_pct(self) -> float:
+        """Signed reduction: positive = Azure < on-prem (good); negative = increase (warn)."""
+        if self.on_prem_vcpu == 0:
+            return 0.0
+        return (self.on_prem_vcpu - self.azure_vcpu) / self.on_prem_vcpu
+
+    @property
+    def memory_reduction_pct(self) -> float:
+        if self.on_prem_memory_gb == 0:
+            return 0.0
+        return (self.on_prem_memory_gb - self.azure_memory_gb) / self.on_prem_memory_gb
+
+
 def build(
     inv: "RVToolsInventory",
     pricing: "AzurePricing",
@@ -52,6 +113,32 @@ def build(
     disk_type: str = "standard_ssd",
     vm_catalog: list["VMSku"] | None = None,
 ) -> ConsumptionPlan:
+    """
+    Build a ConsumptionPlan from RVtools inventory and Azure pricing.
+    Thin wrapper around build_with_validation() — returns only the plan.
+    See build_with_validation() for full parameter documentation.
+    """
+    plan, _ = build_with_validation(
+        inv=inv, pricing=pricing, benchmarks=benchmarks,
+        workload_name=workload_name, usd_to_local=usd_to_local,
+        ramp_preset=ramp_preset, migration_cost_per_vm_lc=migration_cost_per_vm_lc,
+        storage_mode=storage_mode, disk_type=disk_type, vm_catalog=vm_catalog,
+    )
+    return plan
+
+
+def build_with_validation(
+    inv: "RVToolsInventory",
+    pricing: "AzurePricing",
+    benchmarks: BenchmarkConfig | None = None,
+    workload_name: str = "",
+    usd_to_local: float = 1.0,
+    ramp_preset: str = "Extended (100% by Y3)",
+    migration_cost_per_vm_lc: float = 1_500.0,
+    storage_mode: str = "per_vm",
+    disk_type: str = "standard_ssd",
+    vm_catalog: list["VMSku"] | None = None,
+) -> tuple[ConsumptionPlan, RightsizingValidation]:
     """
     Build a ConsumptionPlan from RVtools inventory and Azure pricing.
 
@@ -91,16 +178,25 @@ def build(
     total_azure_vcpu     = 0
     total_azure_mem_gib  = 0.0
     total_azure_stor_gib = 0.0
+    telemetry_count      = 0
+    host_proxy_count     = 0
     fallback_vm_count    = 0
     no_price_vm_count    = 0
+    anomaly_vms: list[dict] = []
 
     vm_records = inv.vm_records  # powered-on, non-template VMs
 
     if not vm_records:
         # No per-VM records — fall back to legacy fleet-aggregate path
         _log.debug("[consumption_builder] No vm_records; using fleet-aggregate fallback")
-        return _aggregate_fallback(inv, pricing, pb, workload_name, usd_to_local,
-                                   ramp_preset, migration_cost_per_vm_lc, storage_mode, disk_type)
+        fallback_plan = _aggregate_fallback(
+            inv, pricing, pb, workload_name, usd_to_local,
+            ramp_preset, migration_cost_per_vm_lc, storage_mode, disk_type,
+        )
+        return fallback_plan, RightsizingValidation(
+            on_prem_vm_count=0,
+            warnings=["No per-VM records found; fleet-aggregate fallback used"],
+        )
 
     for vm in vm_records:
         # ── Utilisation ──────────────────────────────────────────────────
@@ -110,6 +206,10 @@ def build(
         target_vcpu, target_mem_gib = rightsize_vm(vm, cpu_util, mem_util, util_src, pb)
         if util_src == "fallback":
             fallback_vm_count += 1
+        elif "telemetry" in util_src:
+            telemetry_count += 1
+        else:  # "host_proxy"
+            host_proxy_count += 1
 
         # ── Family selection ─────────────────────────────────────────────
         family = select_family(vm, target_vcpu, target_mem_gib, pb)
@@ -132,6 +232,16 @@ def build(
             vm_price_per_hr = ref_vcpu_rate * target_vcpu
             matched_vcpu    = target_vcpu
             matched_mem_gib = target_mem_gib
+
+        # Anomaly: Azure SKU vCPU > 2× source vCPU (typically a family snap-up artefact)
+        if matched_vcpu > vm.vcpu * 2:
+            anomaly_vms.append({
+                "name": vm.name,
+                "src_vcpu": vm.vcpu,
+                "matched_vcpu": matched_vcpu,
+                "target_vcpu": target_vcpu,
+                "util_src": util_src,
+            })
 
         total_compute_usd_yr += vm_price_per_hr * pb.hours_per_year
         total_azure_vcpu     += matched_vcpu
@@ -176,7 +286,7 @@ def build(
         f"  Region / pricing source:   {pricing.region} / {pricing.source}"
     )
 
-    return ConsumptionPlan(
+    plan = ConsumptionPlan(
         workload_name=workload_name,
         azure_vcpu=total_azure_vcpu,
         azure_memory_gb=round(total_azure_mem_gib, 2),
@@ -188,6 +298,57 @@ def build(
         annual_other_consumption_lc_y10=0.0,
     )
 
+    # ── Build Layer 1 → Layer 2 validation checkpoint ───────────────────
+    on_prem_vcpu   = inv.total_vcpu_poweredon or sum(vm.vcpu for vm in vm_records)
+    on_prem_mem_gb = (
+        inv.total_vmemory_gb_poweredon
+        or sum(vm.memory_mib / 1024 for vm in vm_records)
+    )
+
+    validation = RightsizingValidation(
+        on_prem_vcpu=on_prem_vcpu,
+        on_prem_memory_gb=round(on_prem_mem_gb, 2),
+        on_prem_vm_count=len(vm_records),
+        azure_vcpu=total_azure_vcpu,
+        azure_memory_gb=round(total_azure_mem_gib, 2),
+        telemetry_vm_count=telemetry_count,
+        host_proxy_vm_count=host_proxy_count,
+        fallback_vm_count=fallback_vm_count,
+        anomaly_vm_count=len(anomaly_vms),
+        anomaly_vms=anomaly_vms[:20],  # cap list for UI display
+        vcpu_increased=total_azure_vcpu > on_prem_vcpu,
+        memory_increased=total_azure_mem_gib > on_prem_mem_gb * 1.25,
+    )
+
+    if validation.vcpu_increased:
+        validation.warnings.append(
+            f"Azure vCPU ({total_azure_vcpu:,}) exceeds on-prem powered-on "
+            f"({on_prem_vcpu:,}) — review SKU matches for memory-heavy VMs that "
+            f"may have snapped up to a larger family"
+        )
+    if validation.memory_increased:
+        validation.warnings.append(
+            f"Azure memory ({total_azure_mem_gib:,.0f} GiB) exceeds on-prem "
+            f"({on_prem_mem_gb:,.0f} GiB) by >25%"
+        )
+    if fallback_vm_count > len(vm_records) * 0.5:
+        validation.warnings.append(
+            f"{fallback_vm_count}/{len(vm_records)} VMs used assumption fallback "
+            f"factors (no telemetry) — upload a more complete RVTools export for "
+            f"better sizing accuracy"
+        )
+    if validation.anomaly_vm_count > 0:
+        validation.warnings.append(
+            f"{validation.anomaly_vm_count} VM(s) matched to an Azure SKU with "
+            f">2× the source vCPU count — inspect anomaly_vms for details"
+        )
+
+    if validation.warnings:
+        for w in validation.warnings:
+            _log.warning(f"[consumption_builder] Validation: {w}")
+
+    return plan, validation
+
 
 # ---------------------------------------------------------------------------
 # Storage cost helper — per-VM, GiB throughout
@@ -196,29 +357,42 @@ def build(
 def _vm_storage_cost(vm, pb: BenchmarkConfig) -> tuple[float, float]:
     """
     Return (annual_storage_usd, total_gib) for one VM.
-    Priority: vDisk disk_sizes_gib → vPartition → vInfo In Use → vInfo Provisioned × reduction.
-    """
-    if vm.disk_sizes_gib:
-        # Best path: vDisk per-disk GiB assignment
-        annual_usd, _ = _vm_disk_cost(vm.disk_sizes_gib)
-        total_gib = sum(vm.disk_sizes_gib)
-        return annual_usd, total_gib
 
+    Priority — in-use data preferred over provisioned to avoid over-sizing:
+      1. vPartition.Consumed MiB (guest OS view; best for capacity planning)
+      2. vInfo.In Use MiB         (VMware view; second best)
+      3. vDisk.Capacity MiB × (1 − storage_prov_reduction_factor)
+         (provisioned disk, reduced by default 20% to account for headroom)
+      4. vInfo.Provisioned MiB × (1 − storage_prov_reduction_factor) (last resort)
+
+    Rationale: Azure managed disks are billed on provisioned tier size, but
+    the *right* size to provision is how much data actually needs to migrate —
+    i.e. in-use bytes.  assign_cheapest() then maps that to the correct disk
+    tier automatically.  Using raw provisioned sizes (vDisk.Capacity) inflates
+    costs by 2–5× on fleets with over-allocated disks.
+    """
     if vm.partition_consumed_gib > 0:
-        # vPartition consumed (guest OS view)
+        # Best: guest OS consumed view (most accurate for what needs to migrate)
         gib = vm.partition_consumed_gib
         annual_usd, _ = _vm_disk_cost([gib])
         return annual_usd, gib
 
     if vm.inuse_gib > 0:
-        # vInfo In Use MiB → GiB
+        # vInfo In Use MiB → GiB (VMware hypervisor view)
         gib = vm.inuse_gib
         annual_usd, _ = _vm_disk_cost([gib])
         return annual_usd, gib
 
+    if vm.disk_sizes_gib:
+        # vDisk provisioned — apply reduction factor so we don't blindly copy allocation
+        reduced_gib = sum(vm.disk_sizes_gib) * (1.0 - pb.storage_prov_reduction_factor)
+        gib = max(reduced_gib, 1.0)
+        annual_usd, _ = _vm_disk_cost([gib])
+        return annual_usd, gib
+
     if vm.provisioned_gib > 0:
-        # vInfo Provisioned × (1 − reduction)
-        gib = vm.provisioned_gib * (1.0 - pb.storage_prov_reduction_factor)
+        # vInfo Provisioned × reduction (last resort)
+        gib = max(vm.provisioned_gib * (1.0 - pb.storage_prov_reduction_factor), 1.0)
         annual_usd, _ = _vm_disk_cost([max(gib, 1.0)])
         return annual_usd, max(gib, 1.0)
 

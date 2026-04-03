@@ -247,6 +247,107 @@ class TestOutputs:
 
 
 # ---------------------------------------------------------------------------
+# VM Rightsizer — utilisation cap
+# ---------------------------------------------------------------------------
+
+class TestVMRightsizer:
+    """Tests for vm_rightsizer.rightsize_vm() and the 0.95 utilisation cap."""
+
+    def _make_vm(self, vcpu: int = 8, memory_mib: int = 16384):
+        from engine.rvtools_parser import VMRecord
+        return VMRecord(
+            name="test-vm", vcpu=vcpu, memory_mib=memory_mib,
+            host_name="host1", os_cfg="", os_tools="", app_str="",
+            is_windows=True, is_esu=False, is_sql=False,
+        )
+
+    def test_util_cap_prevents_vcpu_inflation(self, default_benchmarks):
+        """CPU util > 100% (VMware ballooning artefact) must be capped at 0.95."""
+        from engine.vm_rightsizer import rightsize_vm
+        vm = self._make_vm(vcpu=4, memory_mib=8192)
+        target_vcpu, _ = rightsize_vm(vm, cpu_util=1.35, mem_util=0.50,
+                                       util_source="vm_telemetry", benchmarks=default_benchmarks)
+        # With cap=0.95, headroom=1.20: target = ceil(4 × 0.95 × 1.20) = ceil(4.56) = 5
+        # Without cap: ceil(4 × 1.35 × 1.20) = ceil(6.48) = 7 — must NOT happen
+        assert target_vcpu <= vm.vcpu * 2, (
+            f"target_vcpu {target_vcpu} > 2× source {vm.vcpu} — cap not applied"
+        )
+
+    def test_util_cap_prevents_memory_inflation(self, default_benchmarks):
+        """Memory util > 100% (VMware ballooning) must be capped at 0.95."""
+        from engine.vm_rightsizer import rightsize_vm
+        vm = self._make_vm(vcpu=4, memory_mib=8192)  # 8 GiB
+        _, target_mem_gib = rightsize_vm(vm, cpu_util=0.60, mem_util=1.20,
+                                          util_source="vm_telemetry", benchmarks=default_benchmarks)
+        source_gib = vm.memory_mib / 1024
+        # With cap=0.95, headroom=1.20: target = ceil(8 × 0.95 × 1.20) = ceil(9.12) = 10 GiB
+        # Without cap: ceil(8 × 1.20 × 1.20) = ceil(11.52) = 12 GiB — must NOT happen
+        # Boundary: 10 ≤ 10.4 (source × 1.30) ✓; 12 > 10.4 ✗
+        assert target_mem_gib <= source_gib * 1.30, (
+            f"target_mem_gib {target_mem_gib:.2f} > 1.30× source — cap not applied"
+        )
+
+    def test_fallback_does_not_exceed_source(self, default_benchmarks):
+        """Fallback factors should produce a target smaller than source."""
+        from engine.vm_rightsizer import rightsize_vm
+        vm = self._make_vm(vcpu=8, memory_mib=32768)
+        target_vcpu, target_mem_gib = rightsize_vm(vm, cpu_util=0.0, mem_util=0.0,
+                                                    util_source="fallback", benchmarks=default_benchmarks)
+        assert target_vcpu <= vm.vcpu
+        assert target_mem_gib <= vm.memory_mib / 1024
+
+
+# ---------------------------------------------------------------------------
+# Consumption builder — storage priority
+# ---------------------------------------------------------------------------
+
+class TestConsumptionBuilderStorage:
+    """Tests for _vm_storage_cost() in-use-preferred priority ordering."""
+
+    def _make_vm(self, **kwargs):
+        from engine.rvtools_parser import VMRecord
+        defaults = dict(
+            name="test-vm", vcpu=4, memory_mib=8192,
+            host_name="host1", os_cfg="", os_tools="", app_str="",
+            is_windows=False, is_esu=False, is_sql=False,
+            disk_sizes_gib=[], partition_consumed_gib=0.0,
+            inuse_gib=0.0, provisioned_gib=0.0,
+        )
+        defaults.update(kwargs)
+        return VMRecord(**defaults)
+
+    def test_partition_consumed_wins_over_provisioned(self, default_benchmarks):
+        """partition_consumed_gib should be used when present, ignoring provisioned."""
+        from engine.consumption_builder import _vm_storage_cost
+        vm = self._make_vm(partition_consumed_gib=50.0, provisioned_gib=200.0,
+                           disk_sizes_gib=[100.0, 100.0])
+        _, gib = _vm_storage_cost(vm, default_benchmarks)
+        assert gib == pytest.approx(50.0), (
+            f"Expected partition_consumed_gib=50. Used {gib:.1f} instead"
+        )
+
+    def test_inuse_wins_over_disk_sizes(self, default_benchmarks):
+        """inuse_gib should win over disk_sizes_gib when partition absent."""
+        from engine.consumption_builder import _vm_storage_cost
+        vm = self._make_vm(inuse_gib=60.0, disk_sizes_gib=[150.0, 150.0])
+        _, gib = _vm_storage_cost(vm, default_benchmarks)
+        assert gib == pytest.approx(60.0), (
+            f"Expected inuse_gib=60. Used {gib:.1f} instead"
+        )
+
+    def test_disk_sizes_reduced_when_no_inuse(self, default_benchmarks):
+        """disk_sizes_gib should be reduced by storage_prov_reduction_factor when used."""
+        from engine.consumption_builder import _vm_storage_cost
+        vm = self._make_vm(disk_sizes_gib=[100.0, 100.0])
+        _, gib = _vm_storage_cost(vm, default_benchmarks)
+        factor = default_benchmarks.storage_prov_reduction_factor
+        expected = 200.0 * (1.0 - factor)
+        assert gib == pytest.approx(expected, abs=0.1), (
+            f"Expected disk_sizes reduced to ~{expected:.1f} GiB, got {gib:.1f}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Fact Checker — CF-based ROI and payback helpers
 # ---------------------------------------------------------------------------
 

@@ -25,6 +25,18 @@ import logging
 _log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Utilisation safety cap
+# ---------------------------------------------------------------------------
+
+# VMware's Consumed/Size MiB ratio can legally exceed 1.0 due to memory
+# ballooning, TPS (Transparent Page Sharing), and swap reclaim — metrics
+# that reflect VMware's memory management, not actual application demand.
+# Capping at 0.95 prevents these artefacts from causing Azure targets to
+# exceed the on-prem provisioned size and consequent SKU snap-up inflation.
+# The same cap is applied to CPU utilisation as a general safety net.
+_UTIL_CAP: float = 0.95
+
+# ---------------------------------------------------------------------------
 # Keyword patterns for workload-type detection
 # ---------------------------------------------------------------------------
 
@@ -132,9 +144,14 @@ def rightsize_vm(
             * (1 + benchmarks.memory_rightsizing_headroom_factor)
         ))
     else:
-        # Utilisation-based sizing
-        eff_cpu = cpu_util if cpu_util > 0 else benchmarks.cpu_util_fallback_factor
-        eff_mem = mem_util if mem_util > 0 else benchmarks.mem_util_fallback_factor
+        # Utilisation-based sizing.
+        # Cap both fractions at _UTIL_CAP (0.95) before applying headroom.
+        # VMware memory "Consumed/Size" can exceed 1.0 due to ballooning/TPS;
+        # CPU "Overall/Max" can spike briefly above 100% during measurement.
+        # Applying headroom on top of an already-inflated utilisation would
+        # produce Azure targets larger than the source on-prem machine.
+        eff_cpu = min(cpu_util if cpu_util > 0 else benchmarks.cpu_util_fallback_factor, _UTIL_CAP)
+        eff_mem = min(mem_util if mem_util > 0 else benchmarks.mem_util_fallback_factor, _UTIL_CAP)
         target_vcpu = max(1, math.ceil(
             vm.vcpu * eff_cpu * (1 + benchmarks.cpu_rightsizing_headroom_factor)
         ))
