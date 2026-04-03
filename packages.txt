@@ -1,3 +1,1 @@
-# System packages installed by Streamlit Community Cloud before pip install.
-# libexpat is required by openpyxl/lxml on Ubuntu-based runners.
 libexpat1
