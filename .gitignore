@@ -23,6 +23,7 @@ Thumbs.db
 
 # Reference workbook and RVtools exports — large binaries, not committed
 *.xlsm
+!Template_BV Benchmark Business Case v6.xlsm
 *.xlsb
 *.xlsx
 RVTools_*.xlsx

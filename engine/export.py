@@ -25,12 +25,16 @@ from __future__ import annotations
 
 import io
 import math
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.models import BenchmarkConfig, BusinessCaseInputs
     from engine.financial_case import FinancialCase
     from engine.outputs import BusinessCaseSummary
+
+# Template workbook — path relative to this file so it works on Streamlit Cloud
+_TEMPLATE_PATH = Path(__file__).parent.parent / "Template_BV Benchmark Business Case v6.xlsm"
 
 # ---------------------------------------------------------------------------
 # Colour palette (consistent with results.py)
@@ -358,7 +362,7 @@ def build_pptx(
 def build_excel(
     inputs: "BusinessCaseInputs",
     benchmarks: "BenchmarkConfig",
-    template_path: str = "Template_BV Benchmark Business Case v6.xlsm",
+    template_path: "str | Path | None" = None,
 ) -> bytes:
     """
     Write engine inputs into the BV Benchmark workbook template yellow cells
@@ -372,7 +376,8 @@ def build_excel(
     import openpyxl
     from copy import deepcopy
 
-    wb = openpyxl.load_workbook(template_path, keep_vba=False, data_only=False)
+    resolved = Path(template_path) if template_path else _TEMPLATE_PATH
+    wb = openpyxl.load_workbook(resolved, keep_vba=False, data_only=False)
     cv  = wb["1-Client Variables"]
     cp  = wb["2a-Consumption Plan Wk1"]
 
