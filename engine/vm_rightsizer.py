@@ -130,11 +130,24 @@ def rightsize_vm(
     When util_source == "fallback", cpu_util and mem_util are 0.0 and the
     BenchmarkConfig fallback factors are applied instead.
     All memory arithmetic is in GiB (vm.memory_mib ÷ 1024).
+
+    Source-size ceiling
+    -------------------
+    The rightsized target is capped at the source VM's own allocation.
+    Rationale: this tool sizes for *migration*, not for upgrades.  If
+    measured utilisation × headroom would push the target above the
+    source allocation, the source is at or near capacity — the right
+    Azure size is at most the same as the source, not larger.  Without
+    this cap, high-utilisation VMs (≥ ~83% with 20% headroom) produce
+    targets above the source vCPU/memory, which then snap up to the next
+    Azure SKU tier and inflate pricing dramatically.
     """
     mem_gib = vm.memory_mib / 1024.0
 
     if util_source == "fallback" or (cpu_util <= 0 and mem_util <= 0):
-        # No utilisation signal — apply assumption factors
+        # No utilisation signal — apply assumption factors.
+        # Fallback factors are < 1.0 so these always reduce the target;
+        # the source-size ceiling is implicitly satisfied.
         target_vcpu = max(1, math.ceil(
             vm.vcpu * benchmarks.cpu_util_fallback_factor
             * (1 + benchmarks.cpu_rightsizing_headroom_factor)
@@ -145,19 +158,26 @@ def rightsize_vm(
         ))
     else:
         # Utilisation-based sizing.
-        # Cap both fractions at _UTIL_CAP (0.95) before applying headroom.
+        # Cap utilisation fractions at _UTIL_CAP (0.95) before applying headroom.
         # VMware memory "Consumed/Size" can exceed 1.0 due to ballooning/TPS;
-        # CPU "Overall/Max" can spike briefly above 100% during measurement.
-        # Applying headroom on top of an already-inflated utilisation would
-        # produce Azure targets larger than the source on-prem machine.
+        # CPU "Overall/Max" can spike briefly above 100%.
         eff_cpu = min(cpu_util if cpu_util > 0 else benchmarks.cpu_util_fallback_factor, _UTIL_CAP)
         eff_mem = min(mem_util if mem_util > 0 else benchmarks.mem_util_fallback_factor, _UTIL_CAP)
-        target_vcpu = max(1, math.ceil(
+
+        raw_vcpu = max(1, math.ceil(
             vm.vcpu * eff_cpu * (1 + benchmarks.cpu_rightsizing_headroom_factor)
         ))
-        target_mem_gib = max(1.0, math.ceil(
+        raw_mem_gib = max(1.0, math.ceil(
             mem_gib * eff_mem * (1 + benchmarks.memory_rightsizing_headroom_factor)
         ))
+
+        # Cap at source allocation: never size UP beyond the existing VM.
+        # A high-utilisation VM is already at capacity — its Azure equivalent
+        # should be the same size, not larger.  SKU-tier snap-up may still add
+        # a small amount (unavoidable with Azure's discrete tiers), but the
+        # starting target is always ≤ source.
+        target_vcpu    = min(vm.vcpu,    raw_vcpu)
+        target_mem_gib = min(mem_gib,    raw_mem_gib)
 
     return target_vcpu, target_mem_gib
 

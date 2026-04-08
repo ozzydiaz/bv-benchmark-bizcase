@@ -128,6 +128,8 @@ Click **✅ Approve Inventory — Proceed to Rightsizing** to continue.
 
 **What happens:** Per-VM rightsizing runs using P95 utilisation telemetry (with headroom), plus a `RightsizingValidation` checkpoint that audits signal quality.
 
+**Source-size ceiling** — The rightsized target (vCPU and memory) is always capped at the source VM's own allocation. This tool sizes for *migration*, not upgrades: if `utilisation × headroom` would push the Azure target above what the VM currently has, the source allocation is already the right size. Without this cap, high-utilisation VMs (running at ≥ 83% with default 20% headroom) would produce targets above the source, causing large snap-ups to the next Azure SKU tier and dramatically inflating cost estimates.
+
 **SKU matching methodology** — Azure VM SKUs come in fixed vCPU/memory tiers. When a rightsized target lands between tiers, a naive "must cover both dimensions strictly" approach forces a snap-up on *both* dimensions simultaneously, inflating the matched SKU (and its cost) far beyond what the workload needs. The engine uses an **asymmetric 3-pass cascade** instead:
 
 1. **Pass 1 — Relaxed secondary dimension:** Each VM is classified as CPU-skewed (high vCPU, low memory — e.g. web/app servers) or memory-skewed (high memory, low vCPU — e.g. databases). The *primary* dimension is always covered in full; the *secondary* dimension is allowed to be up to `SKU tolerance %` below the rightsized target. This mimics the manual Xa2 analysis approach: try a slightly lower value on the non-bottleneck resource first to find a cheaper tier.

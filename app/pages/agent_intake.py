@@ -504,7 +504,9 @@ def _render_l2_override() -> None:
 
         st.markdown("**Headroom and fallback factors**")
         st.caption(
-            "Headroom adds buffer on top of measured utilisation. "
+            "Headroom adds buffer above measured utilisation. "
+            "The rightsized target is always **capped at the source VM size** — "
+            "rightsizing never allocates more vCPU or memory than the on-prem VM already has. "
             "Fallback factors apply only to VMs with no telemetry signal."
         )
         h1, h2, h3, h4 = st.columns(4)
