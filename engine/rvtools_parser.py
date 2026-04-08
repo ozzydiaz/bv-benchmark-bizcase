@@ -110,6 +110,8 @@ class VMRecord:
     provisioned_gib: float = 0.0
     # Inferred Azure region for this VM's host (populated after vHost parse)
     azure_region: str = ""
+    # Signal that produced azure_region: "tld" | "dc_keyword" | "gmt" | "fallback" | "override"
+    azure_region_source: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +632,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         for vm in inv.vm_records:
             signals = inv.host_region_signals.get(vm.host_name)
             if signals:
-                vm.azure_region = _guess_host(
+                vm.azure_region, vm.azure_region_source = _guess_host(
                     host_fqdn=vm.host_name,
                     datacenter=signals.get("dc", ""),
                     domain=signals.get("domain", ""),
@@ -639,6 +641,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 )
             else:
                 vm.azure_region = fleet_fallback
+                vm.azure_region_source = "fallback"
         distinct = len({vm.azure_region for vm in inv.vm_records})
         _log.debug(
             f"[rvtools_parser] Per-VM regions assigned: "

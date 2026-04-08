@@ -185,6 +185,7 @@ def _run_layer1(
                 # means the user explicitly wants all VMs priced against one region).
                 for vm in inv.vm_records:
                     vm.azure_region = region
+                    vm.azure_region_source = "override"
                 st.write(f"✔  Region (override): {region} — applied to all {len(inv.vm_records):,} VMs")
             else:
                 distinct_regions = sorted({vm.azure_region for vm in inv.vm_records if vm.azure_region})
@@ -254,20 +255,51 @@ def _show_layer1() -> None:
     if len(distinct_vm_regions) > 1:
         from collections import Counter
         region_counts = Counter(vm.azure_region for vm in inv.vm_records if vm.azure_region)
+        fallback_count = sum(1 for vm in inv.vm_records if vm.azure_region_source == "fallback")
         with st.expander(
             f"🌍 Multi-region detected — {len(distinct_vm_regions)} Azure regions across "
             f"{len(inv.vm_records):,} powered-on VMs"
         ):
             import pandas as pd
-            rows = [
-                {"Azure Region": r, "VM Count": region_counts[r],
-                 "% of Fleet": f"{region_counts[r]/len(inv.vm_records):.0%}"}
-                for r in sorted(distinct_vm_regions, key=lambda r: -region_counts[r])
-            ]
+            # Source breakdown per region
+            source_by_region: dict[str, Counter] = {}
+            for vm in inv.vm_records:
+                if vm.azure_region:
+                    source_by_region.setdefault(vm.azure_region, Counter())[vm.azure_region_source] += 1
+            rows = []
+            for r in sorted(distinct_vm_regions, key=lambda r: -region_counts[r]):
+                src_counts = source_by_region.get(r, Counter())
+                signal_parts = []
+                for src, label in [("tld", "TLD"), ("dc_keyword", "DC keyword"), ("gmt", "GMT offset"), ("fallback", "no signal ⚠"), ("override", "override")]:
+                    if src_counts.get(src):
+                        signal_parts.append(f"{src_counts[src]} {label}")
+                rows.append({
+                    "Azure Region": r,
+                    "VM Count": region_counts[r],
+                    "% of Fleet": f"{region_counts[r]/len(inv.vm_records):.0%}",
+                    "Signal breakdown": ", ".join(signal_parts),
+                })
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            if fallback_count:
+                st.warning(
+                    f"**{fallback_count} VM(s) have no geographic signal** — host had no recognisable "
+                    f"TLD, datacenter name, or GMT offset. Priced against the fallback region "
+                    f"(`{distinct_vm_regions[0] if fallback_count == len(inv.vm_records) else 'eastus2'}`). "
+                    f"Use the region override below to force a specific region if needed."
+                )
             st.caption(
-                "Each VM will be priced against its own Azure region's live PAYG rates in Layer 2. "
+                "Each VM is priced against its own Azure region's live PAYG rates in Layer 2. "
                 "Use the override below to force a single region if needed."
+            )
+    elif inv.vm_records:
+        # Single region — check if it's all fallbacks (no signal in the whole fleet)
+        fallback_count = sum(1 for vm in inv.vm_records if vm.azure_region_source == "fallback")
+        if fallback_count == len(inv.vm_records):
+            st.warning(
+                f"**No geographic signal detected** — {fallback_count} VM(s) had no recognisable "
+                f"TLD, datacenter name, or GMT offset in vHost data. "
+                f"Defaulting to `{distinct_vm_regions[0] if distinct_vm_regions else 'eastus2'}`. "
+                f"Use the region override below to set the correct Azure region."
             )
 
     st.markdown("##### License Profile")

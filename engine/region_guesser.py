@@ -126,9 +126,15 @@ def guess_for_host(
     gmt_offset: str,
     map_path: Path | None = None,
     fallback: str = "eastus2",
-) -> str:
+) -> tuple[str, str]:
     """
     Infer an Azure region from a single host's geographic signals.
+
+    Returns ``(region, source)`` where source is one of:
+      "tld"        — matched a country-code TLD in the domain or host FQDN
+      "dc_keyword" — matched a city/country keyword in the datacenter name
+      "gmt"        — matched a GMT offset (UTC/0 excluded)
+      "fallback"   — no geographic signal found; fallback region used
 
     Used for per-VM region assignment in merged RVtools exports where
     different hosts may be in different countries / datacenters.
@@ -160,31 +166,31 @@ def guess_for_host(
         region = _match_tld(domain.strip().lower(), tld_map)
         if region:
             _log(f"[per-host] {host_fqdn!r}: region {region!r} ← TLD match on domain '{domain}'")
-            return region
+            return region, "tld"
 
     # 2. Host FQDN TLD (fallback if Domain column is empty)
     if host_fqdn:
         region = _match_tld(host_fqdn.strip().lower(), tld_map)
         if region:
             _log(f"[per-host] {host_fqdn!r}: region {region!r} ← TLD match on FQDN")
-            return region
+            return region, "tld"
 
     # 3. Datacenter name keyword
     if datacenter:
         region = _match_keyword(datacenter.strip().lower(), kw_map)
         if region:
             _log(f"[per-host] {host_fqdn!r}: region {region!r} ← datacenter keyword '{datacenter}'")
-            return region
+            return region, "dc_keyword"
 
     # 4. GMT offset (UTC/0 excluded — not a reliable geographic signal)
     if gmt_offset:
         region = gmt_map.get(str(gmt_offset).strip())
         if region:
             _log(f"[per-host] {host_fqdn!r}: region {region!r} ← GMT offset '{gmt_offset}'")
-            return region
+            return region, "gmt"
 
     _log(f"[per-host] {host_fqdn!r}: no signal — using fallback '{fallback}'")
-    return fallback
+    return fallback, "fallback"
 
 
 def _match_tld(fqdn: str, tld_map: dict[str, str]) -> str | None:
