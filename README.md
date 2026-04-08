@@ -189,13 +189,15 @@ Checks signals in priority order:
 
 | Priority | Signal | Source | Notes |
 |---|---|---|---|
-| 1 | Country-code TLD | `vHost.Domain`, `vMetaData.Server` | `.uk` → `uksouth`; `.de` → `germanywestcentral` etc. |
+| 1 | Country-code TLD | `vHost.Domain`, `vHost.Host` FQDN, `vMetaData.Server` | `.uk` → `uksouth`; `.de` → `germanywestcentral` etc. Applied **per-host** so merged exports with hosts in multiple countries resolve correctly. |
 | 2 | **Datacenter consensus** | `vHost.Datacenter` (host counts) | If ≥50% of hosts share a named DC with a keyword match, that DC wins. More reliable than timezone as enterprises often set all servers to UTC. |
-| 3 | GMT offset | `vHost.GMT Offset` | UTC (offset=0) maps to `uksouth` — used only when no consensus DC exists. |
-| 4 | Datacenter keyword | `vHost.Datacenter` | Any match, no quorum required. |
-| 5 | Fallback | — | `eastus` |
+| 3 | Datacenter keyword | `vHost.Datacenter` | Per-host keyword match (city/country names). UTC (offset=0) is intentionally excluded — enterprises set UTC globally regardless of physical location. |
+| 4 | GMT offset | `vHost.GMT Offset` | Non-UTC offsets only (e.g. UTC+5:30 → `centralindia`). Used only when no DC signal is available. |
+| 5 | Fallback | — | `eastus2` |
 
-Example: a fleet with 88% of hosts in a datacenter named "Phoenix" → `westus3` (Phoenix, AZ), even though all servers are configured to UTC.
+Region inference is **per-VM** (not fleet-wide): each VM is assigned the region inferred from its own host's signals. Merged RVtools exports (multiple datacenters/countries) therefore produce per-VM pricing from the correct Azure region. The Layer 1 inventory view shows the per-region VM breakdown and flags any VMs with no geographic signal.
+
+Example: a fleet with 88% of hosts in a datacenter named "Phoenix" → `westus3` (Phoenix, AZ). A merged export with `.co.uk` domain hosts and `.in` domain hosts will price the UK VMs against `uksouth` and the India VMs against `centralindia` automatically.
 
 #### 2. Live PAYG pricing (`engine/azure_sku_matcher.py`)
 
@@ -208,9 +210,13 @@ Example: a fleet with 88% of hosts in a datacenter named "Phoenix" → `westus3`
 
 | Dimension | With telemetry | Without telemetry (tab absent) |
 |---|---|---|
-| **CPU** | `ceil(vCPU_poweredon × P95_util × (1 + headroom))` | `ceil(vCPU_poweredon × (1 − 0.40))` default 40% reduction |
-| **Memory** | `ceil(mem_gb_poweredon × P95_util × (1 + headroom))` | `ceil(mem_gb_poweredon × (1 − 0.20))` default 20% reduction |
+| **CPU** | `min(vCPU, ceil(vCPU × P95_util × (1 + headroom)))` | `ceil(vCPU × (1 − 0.40))` default 40% reduction |
+| **Memory** | `min(mem_gb, ceil(mem_gb × P95_util × (1 + headroom)))` | `ceil(mem_gb × (1 − 0.20))` default 20% reduction |
 | **Storage** | See modes below | — |
+
+**Source-size ceiling:** targets are capped at the source VM's own allocation (`min(source, raw_target)`). High-utilisation VMs that are already at capacity are not inflated beyond their source size.
+
+**SKU matching:** uses an asymmetric 3-pass cascade. CPU-skewed VMs (high vCPU, low memory) allow the CPU dimension to be up to `tolerance%` below target to avoid a CPU-tier snap-up; memory-skewed VMs apply the same tolerance to memory. Default tolerance 20% (configurable via Layer 2 override slider). Always picks the cheapest result across relaxed and strict passes.
 
 All reduction factors and percentile value (default P95) are configurable in `data/benchmarks_default.yaml`.
 

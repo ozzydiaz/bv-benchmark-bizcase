@@ -5,6 +5,103 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## v1.2.3 — Fix: Source-Size Ceiling for Rightsizing
+**Commit:** `eb60743` | **Date:** 2026-04-08 | **Tests:** 34 ✅ (57 skip/pre-existing fixture)
+
+### What changed
+
+**Root cause fixed:** high-utilisation VMs (running at ≥ ~83%) were producing rightsized targets **above** the source VM's own allocation after the 20% headroom factor was applied. Azure SKU matching then snapped up to the next tier (e.g. 9 vCPU target → D16s = 16 vCPU), compounding across large fleets to produce 2–3× the on-prem vCPU and memory totals.
+
+**Fix — `engine/vm_rightsizer.py`:**
+- `rightsize_vm()` now caps both `target_vcpu` and `target_mem_gib` at the source VM's own allocation: `target = min(source, ceil(source × util × (1 + headroom)))`.
+- Rationale: this tool sizes for *migration*, not upgrades. A VM at capacity already has the right size; SKU-tier rounding handles any remaining gap.
+- Fallback-mode targets (no telemetry) are always below source by construction (fallback factors < 1.0) — unaffected.
+
+**UI — `app/pages/agent_intake.py`:**
+- Layer 2 headroom caption updated: documents the source-size ceiling so users understand why `Azure vCPUs ≤ On-Prem vCPUs` is now guaranteed.
+
+**Docs — `GETTING_STARTED.md`, `README.md`:**
+- Layer 2 section updated with source-size ceiling explanation.
+- Right-sizing formula table updated: `min(vCPU, ceil(...))` notation.
+
+---
+
+## v1.2.2 — Feat: Asymmetric SKU Matching (Layer 2)
+**Commit:** `05dc7ce` | **Date:** 2026-04-08 | **Tests:** 34 ✅
+
+### What changed
+
+Implements the manual Xa2 analysis methodology as an automated **3-pass cascade** in `match_sku()`, replacing the naive strict both-dimensions approach that forced simultaneous vCPU + memory snap-ups between Azure SKU tiers.
+
+**`engine/azure_sku_matcher.py` — `match_sku()`:**
+- New `secondary_tolerance` parameter (default 0.20).
+- **Pass 1 — Relaxed secondary:** classifies VM as CPU-skewed (mem/vCPU < 5 GiB) or memory-skewed (mem/vCPU ≥ 5 GiB). Primary dimension must be fully covered; secondary dimension may be up to `tolerance%` below target. Mirrors the "try slightly lower first" manual Xa2 step.
+- **Pass 2 — Strict both dimensions:** original behaviour unchanged.
+- Final result: cheapest across Pass 1 and Pass 2 — can only reduce or hold cost, never inflate.
+
+**`engine/models.py`:** `BenchmarkConfig.sku_match_secondary_tolerance = 0.20` (new field, fully documented).
+
+**`engine/consumption_builder.py`:** passes `pb.sku_match_secondary_tolerance` to `match_sku()`.
+
+**`app/pages/agent_intake.py`:**
+- New **"SKU match tolerance %"** slider in Layer 2 overrides (0–35%, default 20%).
+- Active tolerance shown in results caption (e.g. `SKU tolerance: 20%`).
+- Full plain-English methodology explanation in the override panel.
+
+**`GETTING_STARTED.md`, `README.md`:** Layer 2 section updated with the 3-pass methodology description.
+
+---
+
+## v1.2.1 — Feat: No-Signal VM Tagging in Layer 1
+**Commits:** `81ce248`, `1307846` | **Date:** 2026-04-08 | **Tests:** 34 ✅
+
+### What changed
+
+**`engine/rvtools_parser.py` — `VMRecord`:**
+- New field `azure_region_source: str` — populated alongside `azure_region` with the signal that produced the region: `"tld"` | `"dc_keyword"` | `"gmt"` | `"fallback"` | `"override"`.
+
+**`engine/region_guesser.py` — `guess_for_host()`:**
+- Now returns `(region, source)` tuple instead of plain `str`.
+
+**`app/pages/agent_intake.py` — Layer 1 inventory view:**
+- Multi-region expander table gains a **"Signal breakdown"** column per region (e.g. `"42 TLD, 8 DC keyword, 15 no signal ⚠"`).
+- Single-region case: if all VMs fell to fallback, a warning banner explains the situation and prompts the user to use the region override.
+- Region override now also sets `azure_region_source = "override"` on each VMRecord.
+
+---
+
+## v1.2.0 — Feat: Per-VM Azure Region Inference for Merged RVtools Exports
+**Commit:** `81ce248` | **Date:** 2026-04-08 | **Tests:** 34 ✅
+
+### What changed
+
+Previously the engine inferred a single fleet-level Azure region and applied it to all VMs. This was incorrect for merged RVtools exports (multiple datacenters/countries combined into one file).
+
+**`engine/region_guesser.py`:**
+- New `guess_for_host(host_fqdn, datacenter, domain, gmt_offset, fallback)` function — returns `(region, source)` using the same priority order as the fleet-level `guess()` but operating on a single host's signals.
+- UTC (offset 0) removed from `gmt_offset_to_region` — not a geographic signal; was incorrectly mapping UTC-configured servers to `uksouth`.
+
+**`engine/rvtools_parser.py`:**
+- vHost loop now builds `host_region_signals: dict[str, dict]` mapping each host FQDN to `{dc, domain, gmt}`.
+- `RVToolsInventory.host_region_signals` field stores the per-host signals.
+- `VMRecord.azure_region` and `VMRecord.azure_region_source` stamped after vHost parse using `guess_for_host()` per VM.
+
+**`engine/consumption_builder.py`:**
+- Per-VM loop now reads `vm.azure_region` and lazily fetches pricing + VM catalog per distinct region (24h disk-cached). VMs from different hosts are priced against their own Azure region.
+
+**`app/pages/agent_intake.py` — Layer 1:**
+- Region override overwrites all VMRecord `azure_region` fields.
+- Multi-region expander shows per-region VM count + signal breakdown for user review before approving Layer 1.
+- Layer 2 results "Pricing source" metric shows `"N regions (per-VM)"` when applicable.
+
+**`data/region_map.yaml`:**
+- UTC offset 0 → `uksouth` removed (not a geographic signal).
+- `fallback_region` changed `eastus` → `eastus2`.
+
+**`app/pages/intake.py`:** fallback default updated to `eastus2`.
+
+---
+
 ## v1.1.1 — Streamlit Cloud Deployment
 **Commits:** `2df5a81`, `e7769cb` | **Date:** 2026-04-03 | **Tests:** 64 ✅
 
