@@ -214,10 +214,10 @@ def render():
         col5, col10 = st.columns(2)
         with col5:
             st.markdown("##### 5-Year Horizon")
-            st.plotly_chart(_exec_chart(summary, 5), use_container_width=True)
+            st.plotly_chart(_exec_chart(summary, 5), use_container_width=True, key="exec_cost_5yr")
         with col10:
             st.markdown("##### 10-Year Horizon")
-            st.plotly_chart(_exec_chart(summary, 10), use_container_width=True)
+            st.plotly_chart(_exec_chart(summary, 10), use_container_width=True, key="exec_cost_10yr")
 
         st.divider()
 
@@ -226,10 +226,10 @@ def render():
         c5, c10 = st.columns(2)
         with c5:
             st.markdown("##### 5-Year")
-            st.plotly_chart(_cumulative_savings_chart(summary, 5), use_container_width=True)
+            st.plotly_chart(_cumulative_savings_chart(summary, 5), use_container_width=True, key="exec_cumsav_5yr")
         with c10:
             st.markdown("##### 10-Year")
-            st.plotly_chart(_cumulative_savings_chart(summary, 10), use_container_width=True)
+            st.plotly_chart(_cumulative_savings_chart(summary, 10), use_container_width=True, key="exec_cumsav_10yr")
 
         st.divider()
 
@@ -250,7 +250,7 @@ def render():
         ))
         fig_wf.update_layout(xaxis_title="Category", yaxis_title="USD/yr (avg)",
                              plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-        st.plotly_chart(fig_wf, use_container_width=True)
+        st.plotly_chart(fig_wf, use_container_width=True, key="exec_waterfall")
 
         # Cost per VM
         vm1, vm2, vm3 = st.columns(3)
@@ -281,7 +281,7 @@ def render():
         m2.metric(f"Azure {h}-Year Total", f"${az_cf_total:,.0f}")
         m3.metric(f"CF NPV ({h}-Year)",    f"${cf_npv:,.0f}")
 
-        st.plotly_chart(_exec_chart(summary, h), use_container_width=True)
+        st.plotly_chart(_exec_chart(summary, h), use_container_width=True, key="cf_cost_chart")
 
         st.subheader(f"Annual Cash Flow Detail ({h}-Year)")
         st.dataframe(
@@ -347,7 +347,7 @@ def render():
             legend=dict(orientation="h"),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_pl, use_container_width=True)
+        st.plotly_chart(fig_pl, use_container_width=True, key="pl_chart")
 
         st.subheader(f"Annual P&L Detail ({ph}-Year)")
         st.dataframe(
@@ -477,10 +477,10 @@ def render():
         ch5, ch10 = st.columns(2)
         with ch5:
             st.markdown("##### 5-Year")
-            st.plotly_chart(_exec_chart(summary, 5), use_container_width=True)
+            st.plotly_chart(_exec_chart(summary, 5), use_container_width=True, key="pres_cost_5yr")
         with ch10:
             st.markdown("##### 10-Year")
-            st.plotly_chart(_exec_chart(summary, 10), use_container_width=True)
+            st.plotly_chart(_exec_chart(summary, 10), use_container_width=True, key="pres_cost_10yr")
 
         st.divider()
 
@@ -489,10 +489,10 @@ def render():
         cs5, cs10 = st.columns(2)
         with cs5:
             st.markdown("##### 5-Year")
-            st.plotly_chart(_cumulative_savings_chart(summary, 5), use_container_width=True)
+            st.plotly_chart(_cumulative_savings_chart(summary, 5), use_container_width=True, key="pres_cumsav_5yr")
         with cs10:
             st.markdown("##### 10-Year")
-            st.plotly_chart(_cumulative_savings_chart(summary, 10), use_container_width=True)
+            st.plotly_chart(_cumulative_savings_chart(summary, 10), use_container_width=True, key="pres_cumsav_10yr")
 
         st.divider()
 
@@ -514,7 +514,7 @@ def render():
             xaxis_title="Category", yaxis_title="USD/yr (avg)",
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
         )
-        st.plotly_chart(fig_wf2, use_container_width=True)
+        st.plotly_chart(fig_wf2, use_container_width=True, key="pres_waterfall")
 
         st.divider()
         st.page_link("pages/export_page.py", label="Go to Export — download as PowerPoint or Excel →", icon="📥")
