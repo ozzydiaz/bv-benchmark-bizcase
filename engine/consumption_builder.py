@@ -40,6 +40,7 @@ from engine.models import (
 )
 from engine.disk_tier_map import vm_annual_storage_cost_usd as _vm_disk_cost
 from engine.vm_rightsizer import resolve_vm_utilisation, rightsize_vm, select_family
+from engine.azure_sku_matcher import get_pricing as _get_pricing, get_vm_catalog as _get_vm_catalog
 
 if TYPE_CHECKING:
     from engine.rvtools_parser import RVToolsInventory
@@ -198,7 +199,37 @@ def build_with_validation(
             warnings=["No per-VM records found; fleet-aggregate fallback used"],
         )
 
+    # ── Build per-region pricing/catalog cache (fetched once per region) ─
+    # VMs from a merged RVtools export may span multiple Azure regions.
+    # We group VMs by their per-host inferred region and fetch pricing once
+    # per distinct region, then price each VM against its own region catalog.
+    fleet_region = pricing.region  # fleet-level region (used as default)
+    _region_pricing_cache: dict[str, "AzurePricing"] = {fleet_region: pricing}
+    _region_catalog_cache: dict[str, list | None] = {fleet_region: vm_catalog}
+
+    def _pricing_for(region: str) -> "AzurePricing":
+        if region not in _region_pricing_cache:
+            try:
+                _region_pricing_cache[region] = _get_pricing(region)
+            except Exception:
+                _region_pricing_cache[region] = pricing  # fall back to fleet pricing
+        return _region_pricing_cache[region]
+
+    def _catalog_for(region: str) -> list | None:
+        if region not in _region_catalog_cache:
+            try:
+                _region_catalog_cache[region] = _get_vm_catalog(region)
+            except Exception:
+                _region_catalog_cache[region] = vm_catalog  # fall back to fleet catalog
+        return _region_catalog_cache[region]
+
     for vm in vm_records:
+        # ── Per-VM region (from host inference; falls back to fleet region) ─
+        vm_region = vm.azure_region if vm.azure_region else fleet_region
+        vm_pricing = _pricing_for(vm_region)
+        vm_cat = _catalog_for(vm_region)
+        vm_ref_vcpu_rate = vm_pricing.price_per_vcpu_hour_usd
+
         # ── Utilisation ──────────────────────────────────────────────────
         cpu_util, mem_util, util_src = resolve_vm_utilisation(vm, inv)
 
@@ -215,21 +246,21 @@ def build_with_validation(
         family = select_family(vm, target_vcpu, target_mem_gib, pb)
 
         # ── SKU match ────────────────────────────────────────────────────
-        if vm_catalog:
+        if vm_cat:
             from engine.azure_sku_matcher import match_sku
             sku = match_sku(
-                target_vcpu, target_mem_gib, vm_catalog, family,
-                fallback_ref_price_per_hour=ref_vcpu_rate * target_vcpu,
+                target_vcpu, target_mem_gib, vm_cat, family,
+                fallback_ref_price_per_hour=vm_ref_vcpu_rate * target_vcpu,
             )
             vm_price_per_hr = sku.price_per_hour_usd
             matched_vcpu    = sku.vcpu
             matched_mem_gib = sku.memory_gib
             if vm_price_per_hr <= 0:
                 no_price_vm_count += 1
-                vm_price_per_hr = ref_vcpu_rate * target_vcpu
+                vm_price_per_hr = vm_ref_vcpu_rate * target_vcpu
         else:
-            # No catalog — use reference per-vCPU rate
-            vm_price_per_hr = ref_vcpu_rate * target_vcpu
+            # No catalog — use reference per-vCPU rate for this region
+            vm_price_per_hr = vm_ref_vcpu_rate * target_vcpu
             matched_vcpu    = target_vcpu
             matched_mem_gib = target_mem_gib
 
@@ -283,7 +314,7 @@ def build_with_validation(
         f"  Matched Azure memory GiB:  {total_azure_mem_gib:,.0f}\n"
         f"  Compute Y10 est:           ${total_compute_usd_yr:,.0f}/yr\n"
         f"  Storage Y10 est:           ${total_storage_usd_yr:,.0f}/yr  (mode={storage_mode})\n"
-        f"  Region / pricing source:   {pricing.region} / {pricing.source}"
+        f"  Regions used:              {sorted(_region_pricing_cache.keys())}"
     )
 
     plan = ConsumptionPlan(

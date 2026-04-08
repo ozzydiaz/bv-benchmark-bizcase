@@ -4,9 +4,9 @@
 #
 # Priority order applied by region_guesser:
 #   1. Country-code TLD in domain / vCenter FQDN  (.uk → uksouth)
-#   2. GMT offset (integer or half-hour string)
+#   2. GMT offset (integer or half-hour string; UTC/0 excluded — see below)
 #   3. Keyword match in datacenter name (case-insensitive substring)
-#   4. Fallback: eastus
+#   4. Fallback: eastus2
 
 # ── TLD → Azure region ──────────────────────────────────────────────────────
 # Map country-code TLDs (and common second-level domains) to the nearest
@@ -65,7 +65,9 @@ gmt_offset_to_region:
   "-180": "brazilsouth"   # UTC-3  (BRT / Brazil / Argentina)
   "-120": "brazilsouth"   # UTC-2  (Atlantic / S.Georgia)
   "-60":  "brazilsouth"   # UTC-1  (Azores / Cape Verde)
-  "0":    "uksouth"       # UTC    (UK / Ireland / Portugal / W.Africa)
+  # UTC (offset 0) is omitted intentionally: enterprises globally set server
+  # clocks to UTC regardless of physical location, so offset 0 is not a
+  # reliable geographic signal.  TLD and datacenter keywords are used instead.
   "60":   "westeurope"    # UTC+1  (CET — most of Europe)
   "120":  "westeurope"    # UTC+2  (EET — Central/Eastern Europe)
   "180":  "uaenorth"      # UTC+3  (EAT / MSK / Gulf states)
@@ -183,4 +185,6 @@ datacenter_keyword_to_region:
   central:         centralus
 
 # ── Fallback ─────────────────────────────────────────────────────────────────
-fallback_region: "eastus"
+# Used when no geographic signal (TLD, datacenter name, or GMT offset) can be
+# inferred from the RVtools inventory.  eastus2 is the default.
+fallback_region: "eastus2"

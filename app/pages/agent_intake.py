@@ -175,16 +175,40 @@ def _run_layer1(
             st.write(f"✔  {inv.num_vms:,} VMs · {inv.num_hosts} hosts")
 
             st.write("Inferring Azure region…")
+            # Fleet-level region: used for display and as the fallback for any VM
+            # whose host had no geographic signal.
             region = region_override.strip() if region_override.strip() else _guess_region(inv)
-            st.write(f"✔  Region: {region}")
 
-            st.write("Fetching Azure pricing and VM catalog…")
+            if region_override.strip():
+                # User forced a region — override every per-VM region assignment
+                # (the parser stamped them using vHost signals; a manual override
+                # means the user explicitly wants all VMs priced against one region).
+                for vm in inv.vm_records:
+                    vm.azure_region = region
+                st.write(f"✔  Region (override): {region} — applied to all {len(inv.vm_records):,} VMs")
+            else:
+                distinct_regions = sorted({vm.azure_region for vm in inv.vm_records if vm.azure_region})
+                if len(distinct_regions) > 1:
+                    st.write(
+                        f"✔  Per-VM regions inferred: "
+                        + ", ".join(distinct_regions)
+                        + f"  (fleet default: {region})"
+                    )
+                else:
+                    st.write(f"✔  Region: {region}")
+
+            st.write(f"Fetching Azure pricing and VM catalog for fleet region {region}…")
             pricing    = _get_pricing(region=region)
             vm_catalog = _get_vm_catalog(region=region)
             st.write(f"✔  {_PRICING_SRC_LABEL.get(pricing.source, pricing.source)}")
 
+            distinct_regions = sorted({vm.azure_region for vm in inv.vm_records if vm.azure_region})
+            region_label = (
+                f"{len(distinct_regions)} regions"
+                if len(distinct_regions) > 1 else region
+            )
             _s.update(
-                label=f"✅ Inventory ready — {inv.num_vms:,} VMs · {region}",
+                label=f"✅ Inventory ready — {inv.num_vms:,} VMs · {region_label}",
                 state="complete", expanded=False,
             )
     except Exception as exc:
@@ -213,12 +237,38 @@ def _show_layer1() -> None:
     c4.metric("Total vCPUs",      f"{inv.total_vcpu:,}")
     c5.metric("Total Memory",     f"{inv.total_vmemory_gb:,.0f} GB")
 
+    distinct_vm_regions = sorted({vm.azure_region for vm in inv.vm_records if vm.azure_region})
+    region_display = (
+        f"{len(distinct_vm_regions)} regions"
+        if len(distinct_vm_regions) > 1
+        else (distinct_vm_regions[0] if distinct_vm_regions else l1["region"])
+    )
     d1, d2, d3, d4, d5 = st.columns(5)
     d1.metric("Storage (prov.)",  f"{inv.total_disk_provisioned_gb:,.0f} GB")
     d2.metric("vCPU/pCore ratio", f"{inv.vcpu_per_core_ratio:.2f}×")
-    d3.metric("Azure Region",     l1["region"])
+    d3.metric("Azure Region(s)",  region_display)
     d4.metric("Pricing",          _PRICING_SRC_LABEL.get(l1["pricing"].source, l1["pricing"].source))
     d5.metric("Parse Warnings",   f"{len(inv.parse_warnings)}" if inv.parse_warnings else "None")
+
+    # Show per-region VM breakdown if the merged file spans multiple geographies
+    if len(distinct_vm_regions) > 1:
+        from collections import Counter
+        region_counts = Counter(vm.azure_region for vm in inv.vm_records if vm.azure_region)
+        with st.expander(
+            f"🌍 Multi-region detected — {len(distinct_vm_regions)} Azure regions across "
+            f"{len(inv.vm_records):,} powered-on VMs"
+        ):
+            import pandas as pd
+            rows = [
+                {"Azure Region": r, "VM Count": region_counts[r],
+                 "% of Fleet": f"{region_counts[r]/len(inv.vm_records):.0%}"}
+                for r in sorted(distinct_vm_regions, key=lambda r: -region_counts[r])
+            ]
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "Each VM will be priced against its own Azure region's live PAYG rates in Layer 2. "
+                "Use the override below to force a single region if needed."
+            )
 
     st.markdown("##### License Profile")
     e1, e2, e3, e4, e5 = st.columns(5)
@@ -381,7 +431,13 @@ def _show_layer2() -> None:
     m2.metric("Storage/yr",     f"${cp.annual_storage_consumption_lc_y10:,.0f}")
     m3.metric("Total Azure/yr", f"${total_az:,.0f}")
     src = l1["pricing"].source
-    m4.metric("Pricing source", l1["region"], delta=_PRICING_SRC_LABEL.get(src, src), delta_color="off")
+    distinct_vm_regions = sorted({vm.azure_region for vm in inv.vm_records if vm.azure_region})
+    region_label = (
+        f"{len(distinct_vm_regions)} regions (per-VM)"
+        if len(distinct_vm_regions) > 1
+        else l1["region"]
+    )
+    m4.metric("Pricing source", region_label, delta=_PRICING_SRC_LABEL.get(src, src), delta_color="off")
 
     if src in ("api", "cache"):
         st.info(

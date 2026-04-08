@@ -12,7 +12,7 @@ against the region evidence collected by rvtools_parser.py:
      frequently set to UTC globally regardless of physical location).
   3. GMT offset (vHost.GMT Offset) — used only when no consensus DC exists
   4. Datacenter name keyword (any match, no quorum required)
-  5. Fallback: data/region_map.yaml → fallback_region (default "eastus")
+  5. Fallback: data/region_map.yaml → fallback_region (default "eastus2")
 
 The result is an Azure armRegionName string suitable for the Azure Retail
 Prices API filter (e.g. "uksouth", "eastus", "centralindia").
@@ -60,7 +60,7 @@ def guess(
     Never raises; falls back to the configured fallback_region.
     """
     rm = _load_map(map_path)
-    fallback = rm.get("fallback_region", "eastus")
+    fallback = rm.get("fallback_region", "eastus2")
     kw_map: list[tuple[str, str | None]] = [
         (k, v) for k, v in rm.get("datacenter_keyword_to_region", {}).items()
     ]
@@ -116,6 +116,74 @@ def guess(
 
     # ── Step 5: Fallback ─────────────────────────────────────────────────
     _log(f"No region signal found — using fallback '{fallback}'")
+    return fallback
+
+
+def guess_for_host(
+    host_fqdn: str,
+    datacenter: str,
+    domain: str,
+    gmt_offset: str,
+    map_path: Path | None = None,
+    fallback: str = "eastus2",
+) -> str:
+    """
+    Infer an Azure region from a single host's geographic signals.
+
+    Used for per-VM region assignment in merged RVtools exports where
+    different hosts may be in different countries / datacenters.
+
+    Priority order (same as fleet-level guess()):
+      1. Domain TLD  (most reliable if country-specific, e.g. '.uk')
+      2. Datacenter name keyword
+      3. GMT offset  (UTC/0 intentionally excluded — not a geographic signal)
+      4. fallback    (passed in by caller; typically the fleet-level guess or eastus2)
+
+    Parameters
+    ----------
+    host_fqdn : str   vHost.Host FQDN for this host
+    datacenter : str  vHost.Datacenter value for this host
+    domain : str      vHost.Domain value for this host
+    gmt_offset : str  vHost.GMT Offset value for this host (as string)
+    map_path : Path | None  override path to region_map.yaml
+    fallback : str    region to return when no signal matches
+    """
+    rm = _load_map(map_path)
+    tld_map: dict[str, str] = rm.get("tld_to_region", {})
+    gmt_map: dict[str, str] = rm.get("gmt_offset_to_region", {})
+    kw_map: list[tuple[str, str | None]] = [
+        (k, v) for k, v in rm.get("datacenter_keyword_to_region", {}).items()
+    ]
+
+    # 1. Domain TLD
+    if domain:
+        region = _match_tld(domain.strip().lower(), tld_map)
+        if region:
+            _log(f"[per-host] {host_fqdn!r}: region {region!r} ← TLD match on domain '{domain}'")
+            return region
+
+    # 2. Host FQDN TLD (fallback if Domain column is empty)
+    if host_fqdn:
+        region = _match_tld(host_fqdn.strip().lower(), tld_map)
+        if region:
+            _log(f"[per-host] {host_fqdn!r}: region {region!r} ← TLD match on FQDN")
+            return region
+
+    # 3. Datacenter name keyword
+    if datacenter:
+        region = _match_keyword(datacenter.strip().lower(), kw_map)
+        if region:
+            _log(f"[per-host] {host_fqdn!r}: region {region!r} ← datacenter keyword '{datacenter}'")
+            return region
+
+    # 4. GMT offset (UTC/0 excluded — not a reliable geographic signal)
+    if gmt_offset:
+        region = gmt_map.get(str(gmt_offset).strip())
+        if region:
+            _log(f"[per-host] {host_fqdn!r}: region {region!r} ← GMT offset '{gmt_offset}'")
+            return region
+
+    _log(f"[per-host] {host_fqdn!r}: no signal — using fallback '{fallback}'")
     return fallback
 
 

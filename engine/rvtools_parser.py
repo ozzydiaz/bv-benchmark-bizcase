@@ -108,6 +108,8 @@ class VMRecord:
     # vInfo fallback storage values (GiB), used when vDisk/vPartition absent
     inuse_gib: float = 0.0
     provisioned_gib: float = 0.0
+    # Inferred Azure region for this VM's host (populated after vHost parse)
+    azure_region: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +211,11 @@ class RVToolsInventory:
     gmt_offsets: list[str] = field(default_factory=list)              # vHost.GMT Offset (as strings)
     domain_names: list[str] = field(default_factory=list)             # vHost.Domain
     vcenter_fqdns: list[str] = field(default_factory=list)            # vMetaData.Server
+
+    # Per-host geographic signals for per-VM region inference.
+    # Keys are host FQDNs; values are dicts with keys: dc, domain, gmt.
+    # Populated during vHost parse; consumed by region_guesser.guess_for_host().
+    host_region_signals: dict[str, dict] = field(default_factory=dict)
 
     # Parse context
     vhost_available: bool = False           # True when vHost tab was present
@@ -496,6 +503,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         domain_vals: set[str] = set()
         host_cpu_util: dict[str, float] = {}
         host_mem_util: dict[str, float] = {}
+        # Per-host geographic signals: {host_fqdn: {dc, domain, gmt}}
+        host_region_signals: dict[str, dict] = {}
 
         for row2 in rows2:
             if ci_host is not None and row2[ci_host] is None:
@@ -524,16 +533,29 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 if isinstance(mem_pct, (int, float)) and mem_pct > 0:
                     host_mem_util[host_fqdn] = float(mem_pct)
 
+            dc = ""
             if ci_dc is not None and row2[ci_dc]:
                 dc = str(row2[ci_dc]).strip()
                 dc_names.add(dc)
                 dc_counts[dc] = dc_counts.get(dc, 0) + 1
             if ci_tz is not None and row2[ci_tz]:
                 tz_names.add(str(row2[ci_tz]).strip())
+            gmt = ""
             if ci_gmt is not None and row2[ci_gmt] is not None:
-                gmt_vals.add(str(row2[ci_gmt]).strip())
+                gmt = str(row2[ci_gmt]).strip()
+                gmt_vals.add(gmt)
+            domain = ""
             if ci_domain is not None and row2[ci_domain]:
-                domain_vals.add(str(row2[ci_domain]).strip().lower())
+                domain = str(row2[ci_domain]).strip().lower()
+                domain_vals.add(domain)
+
+            # Capture per-host geographic signals for per-VM region inference
+            if host_fqdn:
+                host_region_signals[host_fqdn] = {
+                    "dc": dc,
+                    "domain": domain,
+                    "gmt": gmt,
+                }
 
         inv.num_hosts = num_hosts
         inv.total_host_pcores = total_cores
@@ -549,6 +571,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         inv.domain_names           = sorted(domain_vals)
         inv.host_cpu_util          = host_cpu_util
         inv.host_mem_util          = host_mem_util
+        inv.host_region_signals    = host_region_signals
         if host_cpu_util:
             _log.debug(f"[rvtools_parser] Host CPU util: {len(host_cpu_util)} hosts with data")
         if host_mem_util:
@@ -594,6 +617,33 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     # Store per-VM records and host mapping
     inv.vm_records  = _vm_records_on
     inv.vm_to_host  = _vm_to_host
+
+    # ── Per-VM region inference ───────────────────────────────────────────────
+    # Must run after both vInfo (vm_records) and vHost (host_region_signals) are
+    # stored.  Each VM's azure_region is derived from its host's geographic signals
+    # so that merged RVtools exports with hosts in multiple countries/cities produce
+    # correct per-VM pricing.  Fleet-level guess() provides the fallback region for
+    # any host not present in host_region_signals.
+    if inv.host_region_signals:
+        from engine.region_guesser import guess as _guess_fleet, guess_for_host as _guess_host
+        fleet_fallback = _guess_fleet(inv)
+        for vm in inv.vm_records:
+            signals = inv.host_region_signals.get(vm.host_name)
+            if signals:
+                vm.azure_region = _guess_host(
+                    host_fqdn=vm.host_name,
+                    datacenter=signals.get("dc", ""),
+                    domain=signals.get("domain", ""),
+                    gmt_offset=signals.get("gmt", ""),
+                    fallback=fleet_fallback,
+                )
+            else:
+                vm.azure_region = fleet_fallback
+        distinct = len({vm.azure_region for vm in inv.vm_records})
+        _log.debug(
+            f"[rvtools_parser] Per-VM regions assigned: "
+            f"{len(inv.vm_records)} VMs across {distinct} distinct Azure region(s)"
+        )
 
     inv.windows_vms_unknown_version  = win_unversioned
     inv.esu_count_may_be_understated = win_unversioned > 0

@@ -280,7 +280,7 @@ def render():
             try:
                 from engine import azure_sku_matcher, consumption_builder
                 from engine.models import BenchmarkConfig
-                region = st.session_state.get("_inferred_region", "eastus")
+                region = st.session_state.get("_inferred_region", "eastus2")
                 pricing = azure_sku_matcher.get_pricing(region)
                 benchmarks = BenchmarkConfig()
                 cp = consumption_builder.build(
