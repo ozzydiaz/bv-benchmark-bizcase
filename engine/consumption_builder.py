@@ -251,6 +251,7 @@ def build_with_validation(
             sku = match_sku(
                 target_vcpu, target_mem_gib, vm_cat, family,
                 fallback_ref_price_per_hour=vm_ref_vcpu_rate * target_vcpu,
+                secondary_tolerance=pb.sku_match_secondary_tolerance,
             )
             vm_price_per_hr = sku.price_per_hour_usd
             matched_vcpu    = sku.vcpu

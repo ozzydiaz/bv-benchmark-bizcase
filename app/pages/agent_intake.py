@@ -442,9 +442,12 @@ def _show_layer2() -> None:
         if rv.host_proxy_vm_count: parts.append(f"{rv.host_proxy_vm_count} host proxy")
         if rv.fallback_vm_count:   parts.append(f"{rv.fallback_vm_count} fallback factors")
         sig_str = " + ".join(parts) if parts else "fallback only"
+        bm = l2["bm"]
+        tol_pct = int(bm.sku_match_secondary_tolerance * 100)
+        tol_label = f"SKU tolerance: {tol_pct}% (strict)" if tol_pct == 0 else f"SKU tolerance: {tol_pct}%"
         st.caption(
             f"Signal: {sig_str}  |  {rv.telemetry_coverage_pct:.0%} telemetry coverage  |  "
-            f"storage mode: {l2['storage_mode']}  |  horizon: {l2['ramp_preset']}"
+            f"storage mode: {l2['storage_mode']}  |  horizon: {l2['ramp_preset']}  |  {tol_label}"
         )
         for w in rv.warnings:
             st.warning(w)
@@ -526,6 +529,37 @@ def _render_l2_override() -> None:
             key="_l2ov_mem_fb",
         ) / 100
 
+        st.markdown("**SKU matching — secondary dimension tolerance**")
+        st.caption(
+            "Azure VM SKUs come in fixed vCPU/memory tiers. When a rightsized target falls "
+            "between tiers, a strict match forces a snap-up on *both* dimensions simultaneously — "
+            "inflating cost by jumping to a much larger SKU than needed. "
+            "This tolerance allows the **secondary** dimension (the one that is *not* the "
+            "bottleneck for a given VM) to be satisfied slightly below the rightsized target, "
+            "landing on a cheaper tier:\n\n"
+            "- **CPU-skewed VM** (high CPU, low memory — e.g. web/app servers): "
+            "memory must be fully covered; CPU may be up to *tolerance* smaller. "
+            "Avoids a CPU-tier snap-up at the cost of slightly over-provisioning memory.\n"
+            "- **Memory-skewed VM** (high memory, low CPU — e.g. databases, caches): "
+            "CPU must be fully covered; memory may be up to *tolerance* smaller. "
+            "Avoids a memory-tier snap-up at the cost of slightly over-provisioning CPU.\n\n"
+            "The engine always picks the **cheapest result** across the relaxed and strict passes — "
+            "this can only reduce or hold cost, never inflate it. "
+            "Default 20% matches the headroom already built into the target, "
+            "so actual VM utilisation remains covered. Set to 0% to restore strict matching."
+        )
+        sku_tol = st.slider(
+            "SKU match tolerance %", 0, 35,
+            int(bm.sku_match_secondary_tolerance * 100), 5,
+            key="_l2ov_sku_tol",
+            help=(
+                "How far below the rightsized target the secondary resource dimension "
+                "(CPU for memory-skewed VMs; memory for CPU-skewed VMs) may be when "
+                "searching for the least-cost Azure SKU. 0% = strict both-dimensions "
+                "coverage (original behaviour). 20% = default."
+            ),
+        ) / 100
+
         if st.button("↺ Re-run Rightsizing with these settings", key="_rerun_l2"):
             bm_new = BenchmarkConfig(**{
                 **bm.model_dump(),
@@ -533,6 +567,7 @@ def _render_l2_override() -> None:
                 "memory_rightsizing_headroom_factor": mem_head,
                 "cpu_util_fallback_factor":           cpu_fb,
                 "mem_util_fallback_factor":           mem_fb,
+                "sku_match_secondary_tolerance":      sku_tol,
             })
             smode  = "per_vm" if "Per-VM" in new_storage_sel else "aggregate"
             result = _run_layer2(new_ramp, smode, bm_new)

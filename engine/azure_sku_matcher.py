@@ -245,33 +245,110 @@ def match_sku(
     catalog: list[VMSku],
     preferred_family: str = "D",
     fallback_ref_price_per_hour: float = 0.0,
+    secondary_tolerance: float = 0.20,
 ) -> VMSku:
     """
     Return the least-cost Azure SKU satisfying target_vcpu and target_mem_gib.
 
-    Selection logic:
-      1. Filter catalog to SKUs in preferred_family where
-         sku.vcpu >= target_vcpu AND sku.memory_gib >= target_mem_gib.
-      2. Sort filtered candidates by price_per_hour_usd ascending; pick cheapest.
-      3. If preferred_family has no valid match, fall back through D→E→M in order.
-      4. If no priced SKU found anywhere, return a synthetic VMSku with
-         fallback_ref_price_per_hour (avoids crashing; caller emits warning).
+    Selection uses an asymmetric 3-pass cascade that mirrors the manual Xa2
+    analysis methodology — avoiding the "snap-up on both dimensions" problem
+    that occurs when a rightsized target falls between two Azure SKU tiers.
 
-    Least-cost prefers the SKU with the fewest resources that still covers the
-    target — Azure SKUs are sorted by vcpu/memory so cheapest ≈ tightest fit.
+    Pass 1 — Relaxed secondary dimension (cheapest-first, workload-aware)
+    -----------------------------------------------------------------------
+    Classifies the VM as CPU-skewed or memory-skewed based on memory density:
+
+      CPU-skewed  (mem_gib / vcpu < 5 GiB/vCPU — higher CPU, lower memory):
+        Memory is the PRIMARY constraint (must be covered in full).
+        CPU is SECONDARY and may be as low as target_vcpu × (1 - tolerance).
+        → Avoids a CPU-tier snap-up by finding a smaller-vCPU SKU that still
+          fully covers the memory target.  The chosen SKU may carry slightly
+          more memory than needed (acceptable over-provision on the secondary).
+
+      Memory-skewed  (mem_gib / vcpu ≥ 5 GiB/vCPU — higher memory, lower CPU):
+        CPU is the PRIMARY constraint (must be covered in full).
+        Memory is SECONDARY and may be as low as target_mem_gib × (1 - tolerance).
+        → Avoids a memory-tier snap-up by finding a lower-memory SKU that still
+          fully covers the CPU target.  The chosen SKU may carry slightly more
+          vCPUs than needed (acceptable over-provision on the secondary).
+
+    Pass 2 — Strict both-dimensions (original behaviour)
+    -----------------------------------------------------------------------
+      sku.vcpu >= target_vcpu AND sku.memory_gib >= target_mem_gib
+      → Cheapest SKU in preferred_family that fully covers both dimensions.
+
+    Final selection: cheapest result across Pass 1 and Pass 2.
+    Pass 1 can only reduce or hold cost relative to Pass 2; it can never inflate.
+
+    Pass 3 — Family fallback (unchanged)
+    -----------------------------------------------------------------------
+      If neither pass found a priced match in preferred_family, try D→E→M in
+      order.  If still nothing, return a synthetic SKU with fallback rate.
+
+    Parameters
+    ----------
+    target_vcpu : int            Rightsized vCPU target (with headroom already applied).
+    target_mem_gib : float       Rightsized memory target in GiB (with headroom).
+    catalog : list[VMSku]        Pre-fetched per-region VM SKU list with live prices.
+    preferred_family : str       Azure family letter: "D" | "E" | "F" | "M".
+    fallback_ref_price_per_hour  Used when no priced SKU is found.
+    secondary_tolerance : float  Fraction (0–1) by which the secondary dimension
+                                 may fall below its rightsized target in Pass 1.
+                                 0.0 = strict (Pass 1 degenerates to Pass 2).
+                                 Default 0.20 matches the headroom already baked
+                                 into the target, so actual utilisation is still
+                                 covered even with the relaxation applied.
     """
+    mem_density = target_mem_gib / max(target_vcpu, 1)
+    # CPU-skewed threshold: D-series is 4 GiB/vCPU; above 5 → memory-skewed
+    _MEM_DENSITY_THRESHOLD = 5.0
+
+    best_pass1: VMSku | None = None
+    best_pass2: VMSku | None = None
+
     families_to_try = _family_fallback_order(preferred_family)
 
     for family in families_to_try:
-        candidates = [
-            s for s in catalog
-            if s.family == family
-            and s.vcpu >= target_vcpu
-            and s.memory_gib >= target_mem_gib
-            and s.price_per_hour_usd > 0
-        ]
-        if candidates:
-            return min(candidates, key=lambda s: s.price_per_hour_usd)
+        family_skus = [s for s in catalog if s.family == family and s.price_per_hour_usd > 0]
+
+        # ── Pass 1: relaxed secondary dimension ──────────────────────────
+        if secondary_tolerance > 0 and best_pass1 is None:
+            if mem_density < _MEM_DENSITY_THRESHOLD:
+                # CPU-skewed: memory is primary (must be covered); CPU is secondary
+                relaxed_vcpu = target_vcpu * (1.0 - secondary_tolerance)
+                p1_candidates = [
+                    s for s in family_skus
+                    if s.memory_gib >= target_mem_gib
+                    and s.vcpu >= relaxed_vcpu
+                ]
+            else:
+                # Memory-skewed: CPU is primary (must be covered); memory is secondary
+                relaxed_mem = target_mem_gib * (1.0 - secondary_tolerance)
+                p1_candidates = [
+                    s for s in family_skus
+                    if s.vcpu >= target_vcpu
+                    and s.memory_gib >= relaxed_mem
+                ]
+            if p1_candidates:
+                best_pass1 = min(p1_candidates, key=lambda s: s.price_per_hour_usd)
+
+        # ── Pass 2: strict both dimensions ───────────────────────────────
+        if best_pass2 is None:
+            p2_candidates = [
+                s for s in family_skus
+                if s.vcpu >= target_vcpu and s.memory_gib >= target_mem_gib
+            ]
+            if p2_candidates:
+                best_pass2 = min(p2_candidates, key=lambda s: s.price_per_hour_usd)
+
+        # Once we have at least one candidate in this family, stop trying further families
+        if best_pass1 or best_pass2:
+            break
+
+    # Final selection: cheapest across pass 1 and pass 2
+    candidates = [s for s in (best_pass1, best_pass2) if s is not None]
+    if candidates:
+        return min(candidates, key=lambda s: s.price_per_hour_usd)
 
     # No priced match anywhere — try any family ignoring price == 0
     unpriced = [
@@ -280,7 +357,6 @@ def match_sku(
     ]
     if unpriced:
         best = min(unpriced, key=lambda s: (s.vcpu, s.memory_gib))
-        # Use fallback rate if available
         best.price_per_hour_usd = fallback_ref_price_per_hour
         best.source = "fallback"
         return best

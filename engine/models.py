@@ -392,6 +392,32 @@ class BenchmarkConfig(BaseModel):
     mem_per_vcpu_e_series_threshold_gib: float = 6.0   # above this → E-series
     mem_per_vcpu_m_series_threshold_gib: float = 28.0  # above this → M-series
 
+    # SKU matching asymmetric tolerance
+    # When a rightsized VM target falls in the gap between two Azure SKU tiers,
+    # a strict "both dimensions must be fully covered" constraint forces a snap-up
+    # on the unconstrained dimension — often doubling vCPU or memory unnecessarily.
+    #
+    # This tolerance allows the SECONDARY dimension (the one that is not the
+    # bottleneck for this workload) to be satisfied slightly below the rightsized
+    # target, allowing the engine to land on a cheaper SKU tier.
+    #
+    # How it works (mirrors manual Xa2 analysis methodology):
+    #   - CPU-skewed VM (mem_gib / vcpu < 5):  memory is primary (must be covered
+    #     in full); CPU is secondary and may be satisfied by a SKU with as few as
+    #     target_vcpu × (1 - tolerance) vCPUs — avoiding a vCPU tier snap-up.
+    #   - Memory-skewed VM (mem_gib / vcpu ≥ 5): CPU is primary; memory is
+    #     secondary and may be satisfied by a SKU with as little as
+    #     target_mem_gib × (1 - tolerance) GiB — avoiding a memory tier snap-up.
+    #
+    # The cheapest result across the relaxed-secondary pass and the strict pass
+    # is always chosen, so this can only reduce or hold cost, never inflate it.
+    # Default 0.20 matches the headroom factor already applied during rightsizing;
+    # the two-factor buffer means the chosen SKU still covers actual utilisation.
+    #
+    # Set to 0.0 to restore the original strict both-dimensions-must-be-covered
+    # behaviour with no tolerance.
+    sku_match_secondary_tolerance: float = 0.20   # fraction; 0.0 = strict (no relaxation)
+
     @classmethod
     def from_yaml(cls, path: str = "data/benchmarks_default.yaml") -> "BenchmarkConfig":
         """Load benchmark defaults from YAML, accepting only the `default` sub-key."""

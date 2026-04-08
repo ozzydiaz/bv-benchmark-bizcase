@@ -44,7 +44,7 @@ Navigate to `http://localhost:8501`.  The sidebar has two ways to use the app:
 **⚡ Agent Intake (recommended)** — 3-layer checkpoint wizard:
 1. **Upload** your RVTools `.xlsx` export + customer name  
 2. **Layer 1 — Inventory** Review parsed fleet, OS/SQL profile, inferred region, live pricing. Override region/currency if needed. Approve to continue.
-3. **Layer 2 — Rightsizing** Review per-VM rightsizing, telemetry coverage, anomaly list. Tune headroom sliders if needed. Approve to continue.
+3. **Layer 2 — Rightsizing** Review per-VM rightsizing, telemetry coverage, anomaly list. Asymmetric SKU matching avoids snap-up inflation (tune headroom + SKU tolerance sliders). Approve to continue.
 4. **Layer 3 — Financial Model** Review NPV, ROI, payback, cost comparison chart. Add named alternative scenarios side-by-side. Approve to continue.
 5. **Export** Download formatted PowerPoint or pre-filled Excel.
 
