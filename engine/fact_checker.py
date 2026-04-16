@@ -5,6 +5,13 @@ Compares a completed client workbook (.xlsm/.xlsx, saved with computed values)
 against the Python engine's output.  Treats the Excel workbook as the
 authoritative reference; flags discrepancies by severity.
 
+Two modes of validation
+-----------------------
+1. Input comparison  — checks that the BusinessCaseInputs used in the engine
+   run match the input cells in the workbook (yellow cells).
+2. Output comparison — re-runs the engine from the supplied inputs and compares
+   every material KPI against the workbook's cached formula values.
+
 Typical usage:
     from engine.fact_checker import run, FactCheckReport
     report = run(workbook_path="client.xlsm", inputs=my_inputs, benchmarks=my_bm)
@@ -49,9 +56,7 @@ CLIENT_VAR_CELLS: dict[str, str] = {
     "allocated_vmemory_gb":         "D49",
     "allocated_pmemory_gb":         "D50",
     "allocated_storage_gb":         "D54",
-    # Backup / DR sizing — required when backup or DR is activated AND
-    # included in the Azure consumption plan.  If blank, backup/DR storage
-    # should NOT be set to Yes in 2a (the engine treats None/0 as not present).
+    # Backup / DR sizing
     "backup_size_gb":               "D58",
     "backup_num_protected_vms":     "D59",
     "dr_size_gb":                   "D60",
@@ -59,8 +64,6 @@ CLIENT_VAR_CELLS: dict[str, str] = {
     "vcpu_per_core_ratio":          "D66",
     "pcores_windows_server":        "D67",
     "pcores_windows_esu":           "D68",
-    # SQL Server pCore counts — formula default =D67*0.1 / =D68*0.1;
-    # overridden with actuals when derived from RVtools or OS audit
     "pcores_sql_server":            "D70",
     "pcores_sql_esu":               "D71",
     "include_run_rate":             "D153",
@@ -90,23 +93,22 @@ CONSUMPTION_CELLS: dict[str, str] = {
     "ecif_y1": "E22", "ecif_y2": "F22", "ecif_y3": "G22", "ecif_y4": "H22",
     "ecif_y5": "I22", "ecif_y6": "J22", "ecif_y7": "K22", "ecif_y8": "L22",
     "ecif_y9": "M22", "ecif_y10": "N22",
-    # Consumption anchors (full-run values; Y10 anchor in col M for 9-year ramp)
+    # Consumption anchors (full-run values)
     "compute_y1": "E28", "compute_y2": "F28", "compute_y3": "G28",
     "compute_y9": "M28",
     "storage_y1": "E29", "storage_y2": "F29", "storage_y3": "G29",
     "storage_y9": "M29",
     # Options
     "backup_activated":             "E35",
-    "backup_stor_in_consumption":   "E38",  # E38 = storage; E39 = software
+    "backup_stor_in_consumption":   "E38",
     "backup_sw_in_consumption":     "E39",
     "dr_activated":                 "E42",
-    "dr_stor_in_consumption":       "E45",  # E45 = storage; E46 = software
+    "dr_stor_in_consumption":       "E45",
     "dr_sw_in_consumption":         "E46",
 }
 
 # Summary Financial Case: key output cells
 SUMMARY_OUTPUT_CELLS: dict[str, str] = {
-    # Top-level KPIs — present in all workbook versions
     "npv_sq_10yr":          "C6",
     "npv_sq_5yr":           "D6",
     "roi_10yr":             "E6",
@@ -115,7 +117,7 @@ SUMMARY_OUTPUT_CELLS: dict[str, str] = {
     "terminal_value":       "C8",
     "project_npv_10yr":     "C9",
     "project_npv_excl_tv":  "C10",
-    "payback_years":        "E11",  # E11 is consistent; I32 only exists in some versions
+    "payback_years":        "E11",
 }
 
 
@@ -123,14 +125,11 @@ SUMMARY_OUTPUT_CELLS: dict[str, str] = {
 # Severity thresholds
 # ---------------------------------------------------------------------------
 
-# (label_prefix, weight, critical_pct, warn_pct)
-# weight is used for the composite confidence score
 SEVERITY_CONFIG: dict[str, tuple[float, float, float]] = {
     # (weight, critical_pct, warn_pct)
-    # Weights drive the composite confidence score; critical/warn are Δ% thresholds.
     "project_npv_10yr":     (0.25, 2.0,  5.0),
-    "payback_years":        (0.20, 5.0, 10.0),   # 5Y CF-based payback
-    "roi_10yr":             (0.15, 2.0,  5.0),   # 5Y CF-based ROI
+    "payback_years":        (0.20, 5.0, 10.0),
+    "roi_10yr":             (0.15, 2.0,  5.0),
     "terminal_value":       (0.10, 3.0,  7.0),
     "npv_sq_10yr":          (0.08, 2.0,  5.0),
     "npv_azure_10yr":       (0.08, 2.0,  5.0),
@@ -161,6 +160,7 @@ class FactCheckReport:
     workbook_path: str
     checks: list[CheckLine] = field(default_factory=list)
     input_mismatches: list[str] = field(default_factory=list)
+    pipeline_warnings: list[str] = field(default_factory=list)  # non-Excel plausibility issues
     confidence_score: float = 0.0   # 0–100%
     passed: int = 0
     warned: int = 0
@@ -173,6 +173,11 @@ class FactCheckReport:
         print(f"  FACT CHECK REPORT")
         print(f"  Workbook: {self.workbook_path}")
         print(f"{'='*70}")
+
+        if self.pipeline_warnings:
+            print("\n  🚨 PIPELINE PLAUSIBILITY WARNINGS:")
+            for m in self.pipeline_warnings:
+                print(f"     • {m}")
 
         if self.input_mismatches:
             print("\n  ⚠  INPUT MISMATCHES (workbook vs engine inputs):")
@@ -197,7 +202,7 @@ class FactCheckReport:
 
     @property
     def passed_overall(self) -> bool:
-        return self.failed == 0
+        return self.failed == 0 and len(self.pipeline_warnings) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -265,27 +270,139 @@ def _compare_inputs(
             elif abs(e) == 0 and abs(v) > tol:
                 mismatches.append(f"{label}: workbook=0  engine={v:,.2f}")
         except (TypeError, ValueError):
-            # String fields — compare directly
             if str(excel_val).strip().lower() != str(engine_val).strip().lower():
                 mismatches.append(f"{label}: workbook={excel_val!r}  engine={engine_val!r}")
 
     wl = inputs.workloads[0] if inputs.workloads else None
     cp = inputs.consumption_plans[0] if inputs.consumption_plans else None
 
-    check_val("num_vms",          cv[CLIENT_VAR_CELLS["num_vms"]].value,          wl.num_vms if wl else 0)
-    check_val("allocated_vcpu",   cv[CLIENT_VAR_CELLS["allocated_vcpu"]].value,    wl.allocated_vcpu if wl else 0)
+    # ── WorkloadInventory inputs ──────────────────────────────────────────
+    check_val("num_vms",              cv[CLIENT_VAR_CELLS["num_vms"]].value,              wl.num_vms if wl else 0)
+    check_val("allocated_vcpu",       cv[CLIENT_VAR_CELLS["allocated_vcpu"]].value,       wl.allocated_vcpu if wl else 0)
     check_val("allocated_vmemory_gb", cv[CLIENT_VAR_CELLS["allocated_vmemory_gb"]].value, wl.allocated_vmemory_gb if wl else 0)
     check_val("allocated_storage_gb", cv[CLIENT_VAR_CELLS["allocated_storage_gb"]].value, wl.allocated_storage_gb if wl else 0)
     check_val("vcpu_per_core_ratio",  cv[CLIENT_VAR_CELLS["vcpu_per_core_ratio"]].value,  wl.vcpu_per_core_ratio if wl else 0)
     check_val("pcores_windows_server", cv[CLIENT_VAR_CELLS["pcores_windows_server"]].value, wl.pcores_with_windows_server if wl else 0)
     check_val("pcores_windows_esu",    cv[CLIENT_VAR_CELLS["pcores_windows_esu"]].value,    wl.pcores_with_windows_esu if wl else 0)
 
+    # ── ConsumptionPlan inputs ────────────────────────────────────────────
     if cp:
+        check_val("azure_vcpu",       cp_ws[CONSUMPTION_CELLS["azure_vcpu"]].value,       cp.azure_vcpu)
+        check_val("azure_memory_gb",  cp_ws[CONSUMPTION_CELLS["azure_memory_gb"]].value,  cp.azure_memory_gb)
+        check_val("azure_storage_gb", cp_ws[CONSUMPTION_CELLS["azure_storage_gb"]].value, cp.azure_storage_gb)
+
         ramp_cells = ["E17","F17","G17","H17","I17","J17","K17","L17","M17","N17"]
         for i, addr in enumerate(ramp_cells):
             check_val(f"ramp_y{i+1}", cp_ws[addr].value, cp.migration_ramp_pct[i])
 
     return mismatches
+
+
+# ---------------------------------------------------------------------------
+# Pipeline plausibility checks (catch $0 pricing, wrong scope, etc.)
+# ---------------------------------------------------------------------------
+
+def _check_pipeline_plausibility(
+    inputs: BusinessCaseInputs,
+) -> list[str]:
+    """
+    Catch obviously wrong inputs that would silently produce bad numbers.
+
+    These checks are independent of the Excel workbook — they fire whenever
+    the engine inputs are implausible, which typically means a parser or
+    pricing bug upstream (e.g. broken cache returning $0 prices, wrong
+    TCO scope, vPartition Capacity not parsed).
+
+    Returns a list of human-readable warning strings (empty = all OK).
+    """
+    warnings: list[str] = []
+
+    wl = inputs.workloads[0] if inputs.workloads else None
+    cp = inputs.consumption_plans[0] if inputs.consumption_plans else None
+
+    if wl is None or cp is None:
+        return ["No workload or consumption plan in inputs — engine produced no data"]
+
+    # ── Inventory scope sanity ────────────────────────────────────────────
+    if wl.num_vms == 0:
+        warnings.append(
+            "num_vms = 0 — RVTools parser returned no VMs. "
+            "Check sheet name (must be 'vInfo'), column names, and file format."
+        )
+    if wl.allocated_vcpu == 0:
+        warnings.append(
+            "allocated_vcpu = 0 — TCO baseline has no vCPU. "
+            "Check CPUs column in vInfo tab."
+        )
+    if wl.num_vms > 0 and wl.allocated_vcpu > 0:
+        vcpu_per_vm = wl.allocated_vcpu / wl.num_vms
+        if vcpu_per_vm < 0.5 or vcpu_per_vm > 64:
+            warnings.append(
+                f"vcpu_per_vm={vcpu_per_vm:.1f} is outside plausible range [0.5–64]. "
+                "Check if vCPU column is in right units (should be integer count, not MHz)."
+            )
+
+    if wl.vcpu_per_core_ratio < 1.0 or wl.vcpu_per_core_ratio > 8.0:
+        warnings.append(
+            f"vcpu_per_core_ratio={wl.vcpu_per_core_ratio:.2f} is outside plausible range [1.0–8.0]. "
+            "Check vHost tab vCPUs-per-core column; zero-vCPU hosts should be excluded."
+        )
+
+    # ── Azure consumption sanity ──────────────────────────────────────────
+    if cp.azure_vcpu == 0:
+        warnings.append(
+            "azure_vcpu = 0 — rightsizing produced no Azure vCPUs. "
+            "Check vm_records is non-empty and build_with_validation succeeded."
+        )
+
+    if cp.azure_storage_gb == 0 and wl.allocated_storage_gb > 0:
+        warnings.append(
+            "azure_storage_gb = 0 but on-prem has storage. "
+            "Check vPartition/vDisk parsing; _vm_storage_cost() may have no data source."
+        )
+
+    # ── Azure cost plausibility (catches broken pricing cache) ────────────
+    # Minimum plausible: Standard_B2s ($0.0416/hr) × 8,760 hr ≈ $365/VM/yr
+    # Use $200 as a very conservative floor to allow for heavy discounting.
+    # Maximum plausible: $100k/VM/yr (would indicate SKU or pricing data error)
+    num_vms_on = max(cp.azure_vcpu // 4, 1)   # rough VM count from vCPU (4 vCPU avg)
+    compute_yr = cp.annual_compute_consumption_lc_y10
+    if compute_yr > 0:
+        cost_per_vm_est = compute_yr / num_vms_on
+        if cost_per_vm_est < 200:
+            warnings.append(
+                f"Estimated Azure compute cost/VM ≈ ${cost_per_vm_est:,.0f}/yr — suspiciously low "
+                f"(expected ≥ $365/VM/yr for smallest PAYG VM). "
+                "Check Azure pricing cache: run scripts/validate_pricing_cache.py --purge "
+                "if cache files exist but contain $0 prices (bug C1)."
+            )
+        elif cost_per_vm_est > 100_000:
+            warnings.append(
+                f"Estimated Azure compute cost/VM ≈ ${cost_per_vm_est:,.0f}/yr — suspiciously high "
+                f"(expected < $100k/VM/yr). Check Azure pricing region and SKU catalog."
+            )
+    elif wl.num_vms > 0 and cp.azure_vcpu > 0:
+        warnings.append(
+            "annual_compute_consumption_lc_y10 = 0 despite valid Azure vCPU count. "
+            "Azure compute cost is $0 — check pricing cache (likely empty/all-zero: bug C1) "
+            "or confirm vm_catalog was fetched successfully."
+        )
+
+    storage_yr = cp.annual_storage_consumption_lc_y10
+    if storage_yr == 0 and cp.azure_storage_gb > 0:
+        warnings.append(
+            f"annual_storage_consumption_lc_y10 = 0 despite {cp.azure_storage_gb:,.0f} GB storage. "
+            "Storage cost is $0 — check pricing cache gb_rate (should be ~$0.075/GB/mo: bug C2)."
+        )
+    elif storage_yr > 0 and cp.azure_storage_gb > 0:
+        implied_rate = storage_yr / (cp.azure_storage_gb * 12)
+        if implied_rate < 0.01 or implied_rate > 0.50:
+            warnings.append(
+                f"Implied storage rate ${implied_rate:.4f}/GB/mo is outside [0.01–0.50]. "
+                "Expected ~$0.075/GB/mo for Premium SSD P-series. Check _DEFAULT_GB_RATE (bug C2)."
+            )
+
+    return warnings
 
 
 # ---------------------------------------------------------------------------
@@ -316,10 +433,13 @@ def run(
     wb = openpyxl.load_workbook(str(workbook_path), keep_vba=True, data_only=True)
     report = FactCheckReport(workbook_path=str(workbook_path))
 
-    # --- 1. Input comparison ------------------------------------------------
+    # --- 1. Pipeline plausibility (catch $0 pricing, wrong scope, etc.) -----
+    report.pipeline_warnings = _check_pipeline_plausibility(inputs)
+
+    # --- 2. Input comparison ------------------------------------------------
     report.input_mismatches = _compare_inputs(wb, inputs)
 
-    # --- 2. Run engine -------------------------------------------------------
+    # --- 3. Run engine -------------------------------------------------------
     sq = status_quo.compute(inputs, benchmarks)
     depr = depreciation.compute(inputs, benchmarks)
     rc = retained_costs.compute(inputs, benchmarks, sq)
@@ -328,7 +448,7 @@ def run(
     productivity = compute_productivity(inputs, benchmarks)
     nii = compute_nii(fc, benchmarks)
 
-    # --- 3. Extract Excel outputs -------------------------------------------
+    # --- 4. Extract Excel outputs -------------------------------------------
     sfc = wb["Summary Financial Case"]
 
     excel_vals: dict[str, Optional[float]] = {
@@ -336,7 +456,7 @@ def run(
         for k, addr in SUMMARY_OUTPUT_CELLS.items()
     }
 
-    # --- 4. Build engine comparison values ----------------------------------
+    # --- 5. Build engine comparison values ----------------------------------
     wacc = benchmarks.wacc
 
     def _npv_series(series: list[float], years: int = 10) -> float:
@@ -345,10 +465,6 @@ def run(
     sq_total = fc.sq_total()
     az_total = fc.az_total()
 
-    # ROI and payback use the same 5Y CF methodology as the Template's
-    # '5Y CF with Payback' sheet (I31 and I32) — one-time migration
-    # investment vs ongoing P&L savings — NOT the 10Y P&L multi on
-    # total Azure costs stored in summary.roi_10yr.
     cf_roi, cf_payback = compute_cf_roi_and_payback(fc, benchmarks)
 
     engine_vals: dict[str, float] = {
@@ -359,16 +475,15 @@ def run(
         "npv_sq_5yr":           _npv_series(sq_total, 5),
         "npv_azure_10yr":       _npv_series(az_total),
         "npv_azure_5yr":        _npv_series(az_total, 5),
-        # 5Y CF-based metrics — matches Template '5Y CF with Payback'!I31 / I32
         "roi_10yr":             cf_roi,
         "payback_years":        cf_payback,
     }
 
-    # --- 5. Generate check lines --------------------------------------------
+    # --- 6. Generate check lines --------------------------------------------
     for name, engine_val in engine_vals.items():
         report.checks.append(_check(name, excel_vals.get(name), engine_val))
 
-    # --- 6. Tally and compute confidence score ------------------------------
+    # --- 7. Tally and compute confidence score ------------------------------
     weighted_pass = 0.0
     total_weight = 0.0
     for c in report.checks:
@@ -390,5 +505,10 @@ def run(
         non_skip = [c for c in report.checks if c.status != "SKIP"]
         if non_skip:
             report.confidence_score = report.passed / len(non_skip) * 100.0
+
+    # Pipeline warnings lower confidence score (each warning → −10%)
+    if report.pipeline_warnings:
+        penalty = min(len(report.pipeline_warnings) * 10, 50)
+        report.confidence_score = max(report.confidence_score - penalty, 0.0)
 
     return report

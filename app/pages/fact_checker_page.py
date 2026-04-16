@@ -4,13 +4,19 @@ Page — Fact Checker
 Validates the Python engine's computed outputs against a saved copy of the
 BV Benchmark Business Case Excel workbook (.xlsm / .xlsx).
 
-Two modes
----------
-1. Engine-only sanity check (no workbook required)
+Three modes
+-----------
+1. Pipeline health check (no workbook required)
+   Catches upstream parser/pricing bugs BEFORE they reach the financial model:
+   zero Azure compute cost (broken pricing cache), zero storage (wrong storage
+   source), wrong VM counts (bad TCO scope), anomaly SKU matches, etc.
+   These are the bugs that were silently producing wrong UHHS numbers.
+
+2. Engine-only sanity check (no workbook required)
    Runs a battery of self-consistency checks directly against the engine
    outputs that are already in session state — no file upload needed.
 
-2. Excel cross-check (requires saved workbook)
+3. Excel cross-check (requires saved workbook)
    Compares every material KPI against the workbook's cached formula
    values using engine.fact_checker.  The workbook must have been saved
    in Excel so formula cells contain their most recently computed values.
@@ -32,6 +38,155 @@ from engine.outputs import BusinessCaseSummary
 
 def _fmt(v: float) -> str:
     return f"${v:,.0f}"
+
+
+def _pipeline_health_checks(inputs: "BusinessCaseInputs") -> list[dict[str, str]]:
+    """
+    Checks that catch upstream parser and pricing bugs BEFORE they reach the
+    financial model.  These are the exact failure modes observed in the UHHS
+    diagnostic (C1 $0 compute, C2/C3 wrong storage, H1/H2 wrong scope, M1/M4
+    anomaly VMs, H4 vcpu/core ratio).
+
+    Unlike the financial sanity checks below, these do not require a completed
+    business case — they examine the raw inputs from the pipeline.
+    """
+    from engine.fact_checker import _check_pipeline_plausibility
+    checks: list[dict[str, str]] = []
+
+    def _add(name: str, ok: bool, value: str, expected: str, note: str = "") -> None:
+        checks.append({
+            "Check": name,
+            "Value": value,
+            "Expected": expected,
+            "Status": "✅ PASS" if ok else "❌ FAIL",
+            "Note": note,
+        })
+
+    wl = inputs.workloads[0] if inputs.workloads else None
+    cp = inputs.consumption_plans[0] if inputs.consumption_plans else None
+
+    if not wl or not cp:
+        _add("WorkloadInventory present", False, "None", "present", "Run Layer 1 first")
+        return checks
+
+    # ── Inventory scope ───────────────────────────────────────────────────
+    _add(
+        "num_vms > 0 (parser found VMs)",
+        wl.num_vms > 0,
+        f"{wl.num_vms:,}",
+        "> 0",
+        "0 = RVTools vInfo tab missing or wrong sheet name — silent parse failure",
+    )
+    _add(
+        "allocated_vcpu > 0 (TCO baseline)",
+        wl.allocated_vcpu > 0,
+        f"{wl.allocated_vcpu:,}",
+        "> 0",
+        "0 = CPUs column not found; licence and TCO costs will be $0",
+    )
+
+    if wl.num_vms > 0:
+        vcpu_per_vm = wl.allocated_vcpu / wl.num_vms
+        _add(
+            "vCPU/VM ratio plausible (0.5–64)",
+            0.5 <= vcpu_per_vm <= 64,
+            f"{vcpu_per_vm:.1f}",
+            "0.5–64",
+            "Outside range suggests column unit mismatch (MHz vs count)",
+        )
+
+    _add(
+        "vcpu_per_core_ratio plausible (1.0–8.0)",
+        1.0 <= wl.vcpu_per_core_ratio <= 8.0,
+        f"{wl.vcpu_per_core_ratio:.2f}",
+        "1.0–8.0",
+        "< 1.0 = vHost zero-vCPU hosts included (bug H4); "
+        "= 1.0 = vHost tab absent (fallback default)",
+    )
+
+    # ── Azure sizing ──────────────────────────────────────────────────────
+    _add(
+        "azure_vcpu > 0 (rightsizing produced output)",
+        cp.azure_vcpu > 0,
+        f"{cp.azure_vcpu:,}",
+        "> 0",
+        "0 = vm_records empty or build_with_validation failed",
+    )
+    _add(
+        "azure_storage_gb > 0",
+        cp.azure_storage_gb > 0,
+        f"{cp.azure_storage_gb:,.0f} GB",
+        "> 0 GB",
+        "0 = vPartition/vDisk not parsed or _vm_storage_cost() found no source (bug C3)",
+    )
+
+    # ── Pricing plausibility (catches broken Azure pricing cache) ─────────
+    compute_yr = cp.annual_compute_consumption_lc_y10
+    _add(
+        "Azure compute cost > $0",
+        compute_yr > 0,
+        f"${compute_yr:,.0f}/yr",
+        "> $0/yr",
+        "= $0 means pricing cache is empty/all-zero (bug C1). "
+        "Run: scripts/validate_pricing_cache.py --purge",
+    )
+    if compute_yr > 0 and cp.azure_vcpu > 0:
+        cost_per_vcpu = compute_yr / max(cp.azure_vcpu, 1)
+        # ~$0.048/hr × 8760 hr = ~$420/vCPU/yr PAYG; $0.02/hr min = ~$175
+        plausible = 150 <= cost_per_vcpu <= 8_000
+        _add(
+            "Azure compute cost/vCPU plausible ($150–$8k/yr)",
+            plausible,
+            f"${cost_per_vcpu:,.0f}/vCPU/yr",
+            "$150–$8,000",
+            "< $150 = pricing cache still has $0 entries; > $8k = wrong SKU family or region",
+        )
+
+    storage_yr = cp.annual_storage_consumption_lc_y10
+    _add(
+        "Azure storage cost > $0",
+        storage_yr > 0,
+        f"${storage_yr:,.0f}/yr",
+        "> $0/yr",
+        "= $0 despite storage GB set means gb_rate = 0 in cache (bug C2). "
+        "Expected ~$0.075/GB/mo",
+    )
+    if storage_yr > 0 and cp.azure_storage_gb > 0:
+        implied_rate = storage_yr / (cp.azure_storage_gb * 12)
+        _add(
+            "Storage rate plausible ($0.01–$0.50/GB/mo)",
+            0.01 <= implied_rate <= 0.50,
+            f"${implied_rate:.4f}/GB/mo",
+            "$0.01–$0.50",
+            "Expected ~$0.075/GB/mo for Premium SSD P-series. "
+            "Check _DEFAULT_GB_RATE in azure_sku_matcher.py (bug C2)",
+        )
+
+    # ── Azure vs on-prem ratio check (catches anomaly VMs / M1) ──────────
+    if wl.allocated_vcpu > 0 and cp.azure_vcpu > 0:
+        ratio = cp.azure_vcpu / wl.allocated_vcpu
+        _add(
+            "Azure vCPU ≤ 2× on-prem vCPU",
+            ratio <= 2.0,
+            f"{cp.azure_vcpu:,} ({ratio:.2f}× on-prem)",
+            "≤ 2.0×",
+            "> 2× typically means host-proxy anomaly (bug M1) or like-for-like mode active",
+        )
+
+    # ── Additional checks from engine's _check_pipeline_plausibility ─────
+    warnings = _check_pipeline_plausibility(inputs)
+    for w in warnings:
+        # Don't duplicate checks already reported above
+        if not any(w[:30] in c["Note"] for c in checks if c["Status"] == "❌ FAIL"):
+            checks.append({
+                "Check": "Pipeline plausibility",
+                "Value": "—",
+                "Expected": "No warnings",
+                "Status": "⚠️ WARN",
+                "Note": w[:200],
+            })
+
+    return checks
 
 
 def _sanity_checks(summary: "BusinessCaseSummary", inputs: "BusinessCaseInputs") -> list[dict[str, str]]:
@@ -158,8 +313,9 @@ def render() -> None:
     st.title("🔍 Fact Checker")
     st.caption(
         "Validate the business case numbers before presenting to a customer. "
-        "Run a quick engine sanity check against session results, or upload the "
-        "saved Excel workbook for a full line-by-line cross-check."
+        "Start with **Pipeline Health** to catch upstream bugs, then run a "
+        "quick **Engine Sanity** check, or upload the saved Excel workbook for "
+        "a full **Excel Cross-Check**."
     )
 
     from engine import status_quo, retained_costs, depreciation, financial_case, outputs as eng_outputs
@@ -185,7 +341,83 @@ def render() -> None:
     client = inputs.engagement.client_name or "—"
     st.markdown(f"**Engagement:** {client}")
 
-    tab_sanity, tab_excel = st.tabs(["🧮 Engine Sanity Checks", "📋 Excel Cross-Check"])
+    tab_pipeline, tab_sanity, tab_excel = st.tabs([
+        "🚦 Pipeline Health", "🧮 Engine Sanity Checks", "📋 Excel Cross-Check"
+    ])
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # TAB 0 — Pipeline health (parser/pricing/rightsizing inputs)
+    # ─────────────────────────────────────────────────────────────────────────
+    with tab_pipeline:
+        st.subheader("Pipeline Health")
+        st.caption(
+            "Checks the raw inputs produced by the parser and rightsizing engine. "
+            "These catch upstream bugs (broken pricing cache, wrong TCO scope, "
+            "missing storage data) **before** they reach the financial model. "
+            "All checks should pass before trusting Layer 3 outputs."
+        )
+
+        ph_checks = _pipeline_health_checks(inputs)
+        import pandas as pd
+        df_ph = pd.DataFrame(ph_checks)
+
+        ph_passed = sum(1 for c in ph_checks if "PASS" in c["Status"])
+        ph_warned = sum(1 for c in ph_checks if "WARN" in c["Status"])
+        ph_failed = sum(1 for c in ph_checks if "FAIL" in c["Status"])
+        ph_ok     = ph_failed == 0 and ph_warned == 0
+
+        score_ph = 100 * ph_passed / max(len(ph_checks), 1)
+        color_ph = "#00B050" if ph_ok else ("#FFC000" if ph_failed == 0 else "#FF0000")
+        s_ph, r_ph = st.columns([1, 3])
+        s_ph.markdown(
+            f"<div style='text-align:center'>"
+            f"<span style='font-size:2.5rem;font-weight:bold;color:{color_ph}'>{score_ph:.0f}%</span><br>"
+            f"<span style='color:gray;font-size:0.8rem'>Health Score</span>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        with r_ph:
+            label_ph = "✅ All pipeline checks passed" if ph_ok else f"❌ {ph_failed} failure(s) — fix before reviewing financial outputs"
+            st.markdown(f"**{label_ph}**")
+            mp1, mp2, mp3 = st.columns(3)
+            mp1.metric("✅ PASS", ph_passed)
+            mp2.metric("⚠️ WARN", ph_warned)
+            mp3.metric("❌ FAIL", ph_failed)
+
+        if ph_failed > 0:
+            st.error(
+                "**Pipeline failures detected.**  The financial model outputs are likely wrong. "
+                "Fix the issues shown below, re-run the intake, then return here."
+            )
+
+        st.divider()
+
+        def _color_ph_row(row: "pd.Series") -> list[str]:
+            s = row["Status"]
+            if "FAIL" in s: return ["background-color: #FFDDD9"] * len(row)
+            if "WARN" in s: return ["background-color: #FFF4CC"] * len(row)
+            if "PASS" in s: return ["background-color: #E6F4EA"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            df_ph.style.apply(_color_ph_row, axis=1),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── Quick cost summary ────────────────────────────────────────────
+        wl = inputs.workloads[0] if inputs.workloads else None
+        cp = inputs.consumption_plans[0] if inputs.consumption_plans else None
+        if wl and cp:
+            st.divider()
+            st.markdown("#### 📦 Raw Pipeline Outputs")
+            c1, c2, c3, c4, c5, c6 = st.columns(6)
+            c1.metric("VMs (TCO baseline)", f"{wl.num_vms:,}")
+            c2.metric("vCPU (TCO baseline)", f"{wl.allocated_vcpu:,}")
+            c3.metric("Azure vCPU", f"{cp.azure_vcpu:,}")
+            c4.metric("Azure Storage GB", f"{cp.azure_storage_gb:,.0f}")
+            c5.metric("Compute Cost/yr", f"${cp.annual_compute_consumption_lc_y10:,.0f}")
+            c6.metric("Storage Cost/yr", f"${cp.annual_storage_consumption_lc_y10:,.0f}")
 
     # ─────────────────────────────────────────────────────────────────────────
     # TAB 1 — Engine-only sanity checks (no workbook needed)
@@ -304,6 +536,11 @@ def render() -> None:
                     x2.metric("⚠️ WARN", report.warned)
                     x3.metric("❌ FAIL", report.failed)
                     x4.metric("– SKIP", report.skipped)
+
+                if report.pipeline_warnings:
+                    with st.expander(f"🚨 {len(report.pipeline_warnings)} pipeline plausibility warning(s)"):
+                        for w in report.pipeline_warnings:
+                            st.error(w)
 
                 if report.input_mismatches:
                     with st.expander(f"⚠️ {len(report.input_mismatches)} input mismatch(es) detected"):
