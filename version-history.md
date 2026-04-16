@@ -5,6 +5,57 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## v1.3.1 — Refactor: Fact Checker — Pipeline Health Checks
+**Commits:** `532c68b`, `19e28bb` | **Date:** 2026-04-16
+
+### What changed
+
+Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1–C3, H4, M1) that produced incorrect outputs in prior UHHS analysis — bugs the existing Excel cross-check could not detect because they affected inputs, not the financial model math.
+
+**`engine/fact_checker.py`:**
+- New `_check_pipeline_plausibility(inputs)` — catches: `annual_compute_consumption_lc_y10 = 0` (broken pricing cache, C1), implied storage rate outside `$0.01–$0.50/GB/mo` (wrong `gb_rate`, C2), `azure_storage_gb = 0` with on-prem storage present (wrong storage source, C3), `num_vms = 0` or `allocated_vcpu = 0` (silent parse failure), `vcpu_per_core` outside `[1.0–8.0]` (zero-vCPU hosts, H4), `azure_vcpu > 2× on-prem vCPU` (host-proxy anomaly, M1), compute cost/vCPU outside `$150–$8k/yr`.
+- `FactCheckReport` gains `pipeline_warnings: list[str]` field; each warning deducts 10% from confidence score (max 50% penalty).
+- `_compare_inputs()` now also cross-checks `ConsumptionPlan.azure_vcpu`, `azure_memory_gb`, `azure_storage_gb` against Excel `2a-Consumption Plan Wk1` cells D8–D10.
+- `passed_overall` now requires zero pipeline warnings in addition to zero FAIL checks.
+
+**`app/pages/fact_checker_page.py`:**
+- New **"🚦 Pipeline Health"** tab (first tab) — 12 targeted checks covering all UHHS failure modes; shows red banner with remediation instructions when any check fails; raw metric tiles for VMs, vCPU, Azure vCPU, storage GB, compute cost/yr, storage cost/yr.
+- Excel Cross-Check tab now also surfaces pipeline warnings above the check table.
+- Tab order: 🚦 Pipeline Health → 🧮 Engine Sanity → 📋 Excel Cross-Check.
+
+---
+
+## v1.3.0 — Fix: 12 Parser/Pricing/Scope Bugs (C1–C3, H1–H4, M1–M4, L1)
+**Commit:** `532c68b` | **Date:** 2026-04-16
+
+### What changed
+
+Resolved 12 bugs identified in post-engagement UHHS analysis. Full details in `FIX_PROPOSAL.md`.
+
+**Critical (C-series):**
+- **C1 — Broken pricing cache guard** (`azure_sku_matcher.py`): empty/all-zero cache files were silently read, producing `$0` compute costs. Added guard in `_read_vm_price_cache` / `_read_cache` to reject empty or all-zero caches.
+- **C2 — Wrong storage GB rate** (`azure_sku_matcher.py`): `_DEFAULT_GB_RATE` was `0.00` (bug), set to `0.075` (`$0.075/GB/mo` — Azure P10 managed disk list rate).
+- **C3 — Wrong storage source priority** (`consumption_builder.py`): `_vm_storage_cost()` now uses vPartition Capacity MiB first → vDisk provisioned GB second → vInfo last resort. Removed the in-use/consumed paths that undercounted storage by 60–80%.
+
+**High (H-series):**
+- **H1 — Template VMs included in TCO scope** (`rvtools_parser.py`): `is_template` detection moved before powered-on/off accumulators; all-VM counters run for templates too but template records are skipped from `vm_records`.
+- **H2 — Scope applied conditionally** (`rvtools_parser.py`): `include_powered_off` scope is always applied (`include_powered_off_applied = True`); all VMs (powered-on + powered-off) always count toward TCO scope.
+- **H3 — vHost loop counted hosts without powered-on VMs** (`rvtools_parser.py`): `num_hosts` only increments for hosts that have at least one powered-on VM.
+- **H4 — env_tagging_present was always False** (`rvtools_parser.py`): renamed to `lifecycle_env_tags_present`; now uses regex pattern `_LIFECYCLE_ENV_PATTERN` to detect prod/dev/test/uat/qa/staging tags.
+
+**Medium (M-series):**
+- **M1 — vm_rightsizer used broken host-proxy path** (`vm_rightsizer.py`): `resolve_vm_utilisation()` simplified to always return `(0.0, 0.0, "fallback")` — removes unreliable telemetry and host-proxy paths.
+- **M2 — `azure_sku_matcher` min vCPU floor** (`azure_sku_matcher.py`): `min_vcpu = 8` floor applied in `match_sku()`; absolute fallback is `Standard_D8s_v5`.
+- **M3 — vPartition Capacity MiB added** (`rvtools_parser.py`): `VMRecord.partition_capacity_gb` and `RVToolsInventory.total_partition_capacity_gb` populated from vPartition `Capacity MiB`.
+- **M4 — like-for-like sizing mode** (`consumption_builder.py`, `agent_intake.py`): new `sizing_mode` parameter; `"like_for_like"` bypasses rightsizing to match on-prem vCPU/memory directly.
+
+**Low (L-series):**
+- **L1 — env_tagging field rename** (`rvtools_to_inputs.py`, `tests/`): `inv.env_tagging_present` → `inv.lifecycle_env_tags_present`.
+
+**New scripts:** `scripts/validate_pricing_cache.py`, `scripts/audit_inventory_scope.py`.
+
+---
+
 ## v1.2.3 — Fix: Source-Size Ceiling for Rightsizing
 **Commit:** `eb60743` | **Date:** 2026-04-08 | **Tests:** 34 ✅ (57 skip/pre-existing fixture)
 

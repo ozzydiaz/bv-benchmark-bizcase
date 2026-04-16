@@ -245,7 +245,15 @@ def _show_layer1() -> None:
         else (distinct_vm_regions[0] if distinct_vm_regions else l1["region"])
     )
     d1, d2, d3, d4, d5 = st.columns(5)
-    d1.metric("Storage (prov.)",  f"{inv.total_disk_provisioned_gb:,.0f} GB")
+    d1.metric(
+        "Storage (prov.)",
+        f"{inv.total_disk_provisioned_gb:,.0f} GB",
+        help=(
+            "Total provisioned disk from vInfo — for overview only. "
+            "Azure storage costing in Layer 2 uses vPartition Capacity MiB when available, "
+            "falling back to vDisk provisioned GB, then vInfo as last resort."
+        ),
+    )
     d2.metric("vCPU/pCore ratio", f"{inv.vcpu_per_core_ratio:.2f}×")
     d3.metric("Azure Region(s)",  region_display)
     d4.metric("Pricing",          _PRICING_SRC_LABEL.get(l1["pricing"].source, l1["pricing"].source))
@@ -387,8 +395,9 @@ def _run_layer2(
     client_name = l1["client_name"]
 
     try:
-        with st.status("⚙️ Layer 2 — Per-VM rightsizing…", expanded=True) as _s:
-            st.write(f"Rightsizing {len(inv.vm_records):,} powered-on VMs…")
+        mode_label = "like-for-like" if sizing_mode == "like_for_like" else "rightsizing"
+        with st.status(f"⚙️ Layer 2 — Per-VM {mode_label}…", expanded=True) as _s:
+            st.write(f"Sizing {len(inv.vm_records):,} powered-on VMs ({mode_label})…")
             cp, rv = build_with_validation(
                 inv=inv,
                 pricing=pricing,
@@ -400,9 +409,10 @@ def _run_layer2(
                 sizing_mode=sizing_mode,
             )
             wl = workload_inventory_from_rvtools(inv, region=region, workload_name=client_name)
+            sz_label = "Like-for-like" if sizing_mode == "like_for_like" else "Rightsized"
             _s.update(
                 label=(
-                    f"✅ Rightsizing — {cp.azure_vcpu:,} vCPUs · "
+                    f"✅ {sz_label} — {cp.azure_vcpu:,} vCPUs · "
                     f"{cp.azure_memory_gb:,.0f} GB RAM · {cp.azure_storage_gb:,.0f} GB storage"
                 ),
                 state="complete", expanded=False,
@@ -440,16 +450,13 @@ def _show_layer2() -> None:
     r5.metric("Azure Storage",  f"{cp.azure_storage_gb:,.0f} GB")
 
     if rv:
-        parts = []
-        if rv.telemetry_vm_count:  parts.append(f"{rv.telemetry_vm_count} VM telemetry")
-        if rv.host_proxy_vm_count: parts.append(f"{rv.host_proxy_vm_count} host proxy")
-        if rv.fallback_vm_count:   parts.append(f"{rv.fallback_vm_count} fallback factors")
-        sig_str = " + ".join(parts) if parts else "fallback only"
         bm = l2["bm"]
         tol_pct = int(bm.sku_match_secondary_tolerance * 100)
         tol_label = f"SKU tolerance: {tol_pct}% (strict)" if tol_pct == 0 else f"SKU tolerance: {tol_pct}%"
+        sz_mode = l2.get("sizing_mode", "rightsized")
+        sz_label = "like-for-like" if sz_mode == "like_for_like" else "rightsized"
         st.caption(
-            f"Signal: {sig_str}  |  {rv.telemetry_coverage_pct:.0%} telemetry coverage  |  "
+            f"Sizing: {sz_label}  |  fallback factors ({rv.fallback_vm_count} VMs)  |  "
             f"storage mode: {l2['storage_mode']}  |  horizon: {l2['ramp_preset']}  |  {tol_label}"
         )
         for w in rv.warnings:
@@ -507,10 +514,10 @@ def _render_l2_override() -> None:
 
         st.markdown("**Headroom and fallback factors**")
         st.caption(
-            "Headroom adds buffer above measured utilisation. "
+            "Headroom adds buffer above provisioned allocation. "
             "The rightsized target is always **capped at the source VM size** — "
             "rightsizing never allocates more vCPU or memory than the on-prem VM already has. "
-            "Fallback factors apply only to VMs with no telemetry signal."
+            "Fallback factors apply to all VMs (no VM-level utilisation telemetry is read from RVTools)."
         )
         h1, h2, h3, h4 = st.columns(4)
         cpu_head = h1.slider(
@@ -926,8 +933,8 @@ def _render_l2_checkpoint() -> None:
 
     st.subheader("⚙️ Layer 2 — Rightsizing Review")
     st.caption(
-        "Review per-VM rightsizing results and the Layer 1 → Layer 2 validation checkpoint. "
-        "Check the anomaly list and telemetry coverage. "
+        "Review per-VM sizing results and the Layer 1 → Layer 2 validation checkpoint. "
+        "Check the anomaly list (Azure vCPU > 2× source) and storage GB. "
         "Adjust headroom/fallback factors via the override panel if needed. "
         "Enter funding credits, select analysis horizon, then approve."
     )
