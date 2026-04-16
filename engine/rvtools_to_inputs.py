@@ -143,7 +143,7 @@ class PipelineResult:
             "pcores":            inv.pcores_with_sql_server,
             "esu_pcores":        inv.pcores_with_sql_esu,
             "prod_assumed":      inv.sql_prod_assumed,
-            "env_tagging":       inv.env_tagging_present,
+            "env_tagging":       inv.lifecycle_env_tags_present,
         }
 
     @property

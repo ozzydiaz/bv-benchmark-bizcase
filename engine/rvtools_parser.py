@@ -53,6 +53,15 @@ _ENV_NONPROD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# Lifecycle environment keywords that confirm a VM has proper env tagging.
+# Only these keywords set lifecycle_env_tags_present = True.
+# Backup job labels (e.g. "Backups", "Backup_CLE_ENT01") are Avamar/Veeam
+# job names, NOT lifecycle tags, and must not trigger this flag.
+_LIFECYCLE_ENV_PATTERN = re.compile(
+    r"\b(prod|production|dev|development|test|testing|uat|qa|staging|sandbox|non.?prod)\b",
+    re.IGNORECASE,
+)
+
 # ESU-eligible OS versions: 2003, 2008 (inc R2), and 2012 (inc R2).
 # Windows Server 2012/2012 R2 reached end of standard support Oct 2023 and
 # became ESU-eligible.  2003/2008/2008 R2 have been ESU for longer.
@@ -102,7 +111,12 @@ class VMRecord:
     # Per-disk provisioned sizes in GiB (from vDisk 'Capacity MiB' ÷ 1024).
     # Populated in a second pass after vDisk is parsed; defaults to empty.
     disk_sizes_gib: list[float] = field(default_factory=list)
+    # vPartition capacity GB (sum of all partition 'Capacity MiB' / 953.67 for this VM).
+    # Primary storage source for Azure sizing — provisioned filesystem capacity.
+    # 0.0 means vPartition tab absent or no match.
+    partition_capacity_gb: float = 0.0
     # vPartition consumed GiB (sum of all partition 'Consumed MiB' ÷ 1024 for this VM)
+    # Kept for on-prem in-use reporting; NOT used for Azure storage sizing.
     # 0.0 means vPartition tab absent or no match.
     partition_consumed_gib: float = 0.0
     # vInfo fallback storage values (GiB), used when vDisk/vPartition absent
@@ -144,7 +158,8 @@ class RVToolsInventory:
         VMware hardware version predates OS detection), esu_count_may_be_understated
         is set to True and a warning is emitted.
     """
-    # ── ON-PREM TCO BASELINE (all VMs, incl. powered-off, excl. templates) ──
+    # ── ON-PREM TCO BASELINE (ALL VMs: powered-on + powered-off + templates) ──
+    # Matches Excel '1-Client Variables'!D39: total VM count the customer pays for.
     num_vms: int = 0
     total_vcpu: int = 0
     total_vmemory_gb: float = 0.0
@@ -178,7 +193,11 @@ class RVToolsInventory:
     sql_detection_source: str = "default"  # 'application' | 'default'
 
     # Environment tagging coverage
-    env_tagging_present: bool = False     # True if ≥1 VM has any non-empty Environment tag
+    # True only when at least one VM has a *lifecycle* environment tag
+    # (prod/dev/test/staging/uat/qa/sandbox).  Backup job labels such as
+    # "Backups" or "Backup_CLE_ENT01" (Avamar job names) are NOT lifecycle
+    # tags and do NOT set this flag.
+    lifecycle_env_tags_present: bool = False
 
     # ── AZURE MIGRATION TARGET (powered-on VMs only) ──
     num_vms_poweredon: int = 0
@@ -195,6 +214,11 @@ class RVToolsInventory:
     # Keys are VM names; values are lists of provisioned sizes in GiB (float).
     # Populated only for powered-on, non-template VMs.  Empty when vDisk tab absent.
     vm_disk_sizes_gb: dict[str, list[float]] = field(default_factory=dict)
+
+    # vPartition provisioned capacity (Capacity MiB / 953.67) — primary storage source
+    # for Azure sizing.  More accurate than vDisk because it reflects filesystem layout.
+    # 0.0 when vPartition tab is absent.
+    total_partition_capacity_gb: float = 0.0      # powered-on VMs only
 
     # ── UTILISATION TELEMETRY (from vCPU and vMemory tabs) ──
     # Values are fleet P95 fractions (0–1+); 0.0 = telemetry not available.
@@ -268,28 +292,21 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     Parse an RVTools export and return an aggregated RVToolsInventory.
 
     TCO baseline scope (num_vms, vCPU, memory, storage, Windows/ESU pCores)
-    is auto-detected from vHost tab availability when include_powered_off=None:
-
-      vHost tab present  → powered-on VMs only (default).  The vHost tab
-        confirms the physical host inventory; powered-off VMs represent idle
-        capacity not consuming active hardware resources.
-        Override: pass include_powered_off=True to also count powered-off VMs.
-
-      vHost tab absent   → all VMs, powered-on + powered-off (default).
-        Without host data the inventory may be incomplete, so every VM is
-        included to avoid understating the baseline.
-        Override: pass include_powered_off=False to limit to powered-on only.
+    always includes ALL VMs — powered-on, powered-off, and templates.
+    This matches the Excel model: '1-Client Variables'!D39 counts total VMs
+    regardless of power state or template status, because the customer pays
+    for server hardware and licences covering the entire estate.
 
     Azure migration sizing fields (num_vms_poweredon, total_vcpu_poweredon,
     total_vmemory_gb_poweredon, total_storage_poweredon_gb) are ALWAYS
-    powered-on only regardless of this setting.
+    powered-on only — only running VMs are migrated to Azure.
+
+    vm_records contains powered-on, non-template VMs for per-VM rightsizing.
 
     Args:
         path: Path to the RVTools .xlsx file.
-        include_powered_off: Override for TCO baseline scope.
-            None (default) = auto-detect from vHost availability.
-            True  = include powered-off VMs (even if vHost is present).
-            False = exclude powered-off VMs (even if vHost is absent).
+        include_powered_off: Deprecated override — kept for backwards
+            compatibility but ignored.  TCO baseline now always uses all VMs.
     """
     path = Path(path)
     inv = RVToolsInventory(source_file=str(path))
@@ -344,9 +361,10 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             if ci_name is not None and row[ci_name] is None:
                 continue
 
-            # Skip template entries — they inflate VM counts and licence metrics
-            if ci_template is not None and row[ci_template] is True:
-                continue
+            # Detect template entries — templates count in the TCO baseline
+            # (customer pays for their licences/hardware) but are NOT migrated
+            # to Azure, so they are excluded from vm_records and Azure sizing.
+            is_template = (ci_template is not None and row[ci_template] is True)
 
             is_on = (
                 ci_power is not None
@@ -387,7 +405,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 or "sql server" in os_tools.lower()
             )
 
-            # ── All-VM accumulators ──
+            # ── All-VM accumulators (TCO baseline — includes templates) ──
             num_vms_all += 1
             if isinstance(cpus, (int, float)):
                 total_vcpu_all += vm_cpus
@@ -402,8 +420,8 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 elif not is_win_versioned:
                     # No 4-digit year in either OS column — truly unversioned
                     win_unversioned_all += 1
-            # Track whether any VM has an environment tag at all
-            if env_str:
+            # Track lifecycle environment tags (backup labels are NOT lifecycle tags)
+            if env_str and _LIFECYCLE_ENV_PATTERN.search(env_str):
                 env_all_tagged_count += 1
 
             if is_sql:
@@ -419,6 +437,10 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
                 else:
                     # No environment tag — default assumption: production
                     sql_prod_all += 1
+
+            # Templates excluded from Azure sizing and powered-on counters
+            if is_template:
+                continue
 
             # ── Powered-on accumulators ──
             if is_on:
@@ -508,11 +530,21 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         # Per-host geographic signals: {host_fqdn: {dc, domain, gmt}}
         host_region_signals: dict[str, dict] = {}
 
+        # Build set of host names that have at least one powered-on VM assigned.
+        # Hosts with zero VMs (e.g. empty EPIC-RDB cluster nodes) are excluded
+        # from num_hosts to match the BA's physical host count.
+        _hosts_with_vms: set[str] = {
+            vm.host_name for vm in _vm_records_on if vm.host_name
+        }
+
         for row2 in rows2:
             if ci_host is not None and row2[ci_host] is None:
                 continue
             host_fqdn = str(row2[ci_host]).strip() if ci_host is not None else ""
-            num_hosts += 1
+
+            # Only count hosts that have at least one powered-on VM assigned
+            if host_fqdn in _hosts_with_vms:
+                num_hosts += 1
 
             cores = row2[ci_cores] if ci_cores is not None else None
             if isinstance(cores, (int, float)):
@@ -582,33 +614,21 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     # ------------------------------------------------------------------
     # Resolve TCO baseline scope and populate primary inv fields
     # ------------------------------------------------------------------
+    # TCO baseline ALWAYS uses the all-VM all-power-state scope (incl. templates).
+    # This matches '1-Client Variables'!D39 in the Excel model — the customer
+    # pays for hardware/licences covering the entire estate.
+    # The include_powered_off parameter is kept for backwards compatibility but
+    # no longer changes the TCO baseline behaviour.
     inv.vhost_available = vhost_found
-    if include_powered_off is None:
-        # Auto-detect: powered-on only when vHost confirms complete inventory;
-        # all VMs when vHost is absent.
-        resolved_poff = not vhost_found
-    else:
-        resolved_poff = include_powered_off
-    inv.include_powered_off_applied = resolved_poff
+    inv.include_powered_off_applied = True   # TCO always includes all VMs
 
-    if resolved_poff:
-        # TCO baseline = all VMs (vHost absent, or explicit override=True)
-        inv.num_vms               = num_vms_all
-        inv.total_vcpu            = total_vcpu_all
-        inv.total_vmemory_gb      = round(total_mem_mb_all * MB_TO_GB, 2)
-        inv.total_storage_in_use_gb = round(total_stor_mib_all * MIB_TO_GB, 2)
-        inv._win_vcpus     = win_vcpus_all      # type: ignore[attr-defined]
-        inv._win_esu_vcpus = win_esu_vcpus_all  # type: ignore[attr-defined]
-        win_unversioned    = win_unversioned_all
-    else:
-        # TCO baseline = powered-on only (vHost present, or explicit override=False)
-        inv.num_vms               = num_vms_on
-        inv.total_vcpu            = total_vcpu_on
-        inv.total_vmemory_gb      = round(total_mem_mb_on * MB_TO_GB, 2)
-        inv.total_storage_in_use_gb = round(total_stor_mib_on * MIB_TO_GB, 2)
-        inv._win_vcpus     = win_vcpus_on       # type: ignore[attr-defined]
-        inv._win_esu_vcpus = win_esu_vcpus_on   # type: ignore[attr-defined]
-        win_unversioned    = win_unversioned_on
+    inv.num_vms               = num_vms_all
+    inv.total_vcpu            = total_vcpu_all
+    inv.total_vmemory_gb      = round(total_mem_mb_all * MB_TO_GB, 2)
+    inv.total_storage_in_use_gb = round(total_stor_mib_all * MIB_TO_GB, 2)
+    inv._win_vcpus     = win_vcpus_all      # type: ignore[attr-defined]
+    inv._win_esu_vcpus = win_esu_vcpus_all  # type: ignore[attr-defined]
+    win_unversioned    = win_unversioned_all
 
     # Azure sizing: always powered-on regardless of TCO scope
     inv.num_vms_poweredon          = num_vms_on
@@ -651,15 +671,11 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     inv.windows_vms_unknown_version  = win_unversioned
     inv.esu_count_may_be_understated = win_unversioned > 0
 
-    # Log which scope was applied and why
-    scope_label = "all VMs" if resolved_poff else "powered-on VMs only"
-    if include_powered_off is not None:
-        reason = f"override (include_powered_off={include_powered_off})"
-    elif vhost_found:
-        reason = "vHost tab present"
-    else:
-        reason = "vHost tab absent"
-    _log.debug(f"[rvtools_parser] TCO baseline: {scope_label} ({inv.num_vms:,} VMs) — {reason}")
+    # Log which scope was applied
+    _log.debug(
+        f"[rvtools_parser] TCO baseline: all VMs incl. templates ({inv.num_vms:,} VMs), "
+        f"powered-on for Azure sizing ({inv.num_vms_poweredon:,} VMs)"
+    )
 
     if win_unversioned > 0:
         warnings.append(
@@ -686,7 +702,7 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     inv.sql_vms_prod         = sql_prod_all
     inv.sql_vms_nonprod      = sql_nonprod_all
     inv.sql_prod_assumed     = (sql_vms_all > 0 and sql_env_tagged_count == 0)
-    inv.env_tagging_present  = env_all_tagged_count > 0
+    inv.lifecycle_env_tags_present = env_all_tagged_count > 0
     if sql_vcpus_all > 0:
         inv.pcores_with_sql_server = round(sql_vcpus_all / ratio)
         inv.sql_detection_source   = "application"
@@ -856,24 +872,45 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         )
 
     # ------------------------------------------------------------------
-    # vPartition tab — per-VM consumed filesystem storage (GiB)
-    # Used as storage fallback when vDisk tab is absent.
+    # vPartition tab — per-VM filesystem storage
+    # 'Capacity MiB' = provisioned filesystem capacity → primary source for
+    # Azure storage sizing (matches BA methodology).
+    # 'Consumed MiB' = in-use bytes → retained for on-prem reporting only.
+    # Both use MIB_TO_GB (÷ 953.67) to produce decimal GB matching the BA.
     # ------------------------------------------------------------------
     if "vPartition" in wb.sheetnames:
         ws_part = wb["vPartition"]
         rp = ws_part.iter_rows(values_only=True)
         hp = list(next(rp))
-        ci_pvm  = _col_index(hp, "VM",           [])
-        ci_ppow = _col_index(hp, "Powerstate",   [])
-        ci_pcon = _col_index(hp, "Consumed MiB", [])
-        part_consumed: dict[str, float] = {}
+        ci_pvm  = _col_index(hp, "VM",            [])
+        ci_ppow = _col_index(hp, "Powerstate",    [])
+        ci_pcap = _col_index(hp, "Capacity MiB",  [])   # provisioned filesystem GB
+        ci_pcon = _col_index(hp, "Consumed MiB",  [])   # in-use GiB (reporting only)
+        part_capacity: dict[str, float] = {}   # GB (decimal)
+        part_consumed: dict[str, float] = {}   # GiB (binary, legacy)
         for row in rp:
             if ci_ppow is not None and str(row[ci_ppow] or "").lower() != "poweredon":
                 continue
             vm_n = str(row[ci_pvm] or "") if ci_pvm is not None else ""
-            con  = row[ci_pcon] if ci_pcon is not None else None
-            if vm_n and isinstance(con, (int, float)) and con > 0:
+            if not vm_n:
+                continue
+            cap = row[ci_pcap] if ci_pcap is not None else None
+            con = row[ci_pcon] if ci_pcon is not None else None
+            if isinstance(cap, (int, float)) and cap > 0:
+                part_capacity[vm_n] = part_capacity.get(vm_n, 0.0) + float(cap) * MIB_TO_GB
+            if isinstance(con, (int, float)) and con > 0:
                 part_consumed[vm_n] = part_consumed.get(vm_n, 0.0) + float(con) * MIB_TO_GIB
+
+        if part_capacity:
+            inv.total_partition_capacity_gb = round(sum(part_capacity.values()), 2)
+            # Populate VMRecord.partition_capacity_gb
+            for vm_rec in inv.vm_records:
+                if vm_rec.name in part_capacity:
+                    vm_rec.partition_capacity_gb = round(part_capacity[vm_rec.name], 4)
+            _log.debug(
+                f"[rvtools_parser] vPartition capacity: {len(part_capacity):,} VMs, "
+                f"total {inv.total_partition_capacity_gb:,.0f} GB"
+            )
         if part_consumed:
             inv.vm_partition_consumed_gib = {k: round(v, 4) for k, v in part_consumed.items()}
             # Populate VMRecord.partition_consumed_gib

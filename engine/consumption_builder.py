@@ -139,6 +139,7 @@ def build_with_validation(
     storage_mode: str = "per_vm",
     disk_type: str = "standard_ssd",
     vm_catalog: list["VMSku"] | None = None,
+    sizing_mode: str = "rightsized",
 ) -> tuple[ConsumptionPlan, RightsizingValidation]:
     """
     Build a ConsumptionPlan from RVtools inventory and Azure pricing.
@@ -169,6 +170,10 @@ def build_with_validation(
     vm_catalog : list[VMSku] | None
         Pre-fetched VM SKU catalog with live prices.  If None, the engine
         falls back to the reference per-vCPU rate from AzurePricing.
+    sizing_mode : str
+        "rightsized" (default) — apply utilisation × headroom reduction.
+        "like_for_like" — match Azure SKU to current vCPU/vMemory directly;
+            no utilisation adjustment.  Produces the 16,318-vCPU BA baseline.
     """
     pb = benchmarks or BenchmarkConfig()
     ref_vcpu_rate = pricing.price_per_vcpu_hour_usd   # fallback rate
@@ -234,9 +239,18 @@ def build_with_validation(
         cpu_util, mem_util, util_src = resolve_vm_utilisation(vm, inv)
 
         # ── Rightsize ────────────────────────────────────────────────────
-        target_vcpu, target_mem_gib = rightsize_vm(vm, cpu_util, mem_util, util_src, pb)
+        if sizing_mode == "like_for_like":
+            # Match current provisioned vCPU / memory directly — no reduction.
+            # Produces the BA "provisioned" baseline for comparison.
+            target_vcpu    = max(vm.vcpu, 1)
+            target_mem_gib = max(vm.memory_mib / 1024.0, 0.5)
+            util_src = "like_for_like"
+        else:
+            target_vcpu, target_mem_gib = rightsize_vm(vm, cpu_util, mem_util, util_src, pb)
         if util_src == "fallback":
             fallback_vm_count += 1
+        elif util_src == "like_for_like":
+            fallback_vm_count += 1   # grouped with fallback for reporting
         elif "telemetry" in util_src:
             telemetry_count += 1
         else:  # "host_proxy"
@@ -388,45 +402,36 @@ def build_with_validation(
 
 def _vm_storage_cost(vm, pb: BenchmarkConfig) -> tuple[float, float]:
     """
-    Return (annual_storage_usd, total_gib) for one VM.
+    Return (annual_storage_usd, total_gb) for one VM.
 
-    Priority — in-use data preferred over provisioned to avoid over-sizing:
-      1. vPartition.Consumed MiB (guest OS view; best for capacity planning)
-      2. vInfo.In Use MiB         (VMware view; second best)
-      3. vDisk.Capacity MiB × (1 − storage_prov_reduction_factor)
-         (provisioned disk, reduced by default 20% to account for headroom)
-      4. vInfo.Provisioned MiB × (1 − storage_prov_reduction_factor) (last resort)
+    Priority — provisioned filesystem capacity preferred (matches BA methodology):
+      1. vPartition.Capacity MiB / 953.67 (provisioned filesystem GB — BA primary)
+         Azure bills on provisioned tier size; provisioned capacity is what needs
+         to be allocated on the Azure side.
+      2. vDisk.Capacity MiB (provisioned disk from hypervisor — no reduction)
+      3. vInfo.Provisioned MiB / 953.67 (last resort when no vDisk/vPartition tab)
 
-    Rationale: Azure managed disks are billed on provisioned tier size, but
-    the *right* size to provision is how much data actually needs to migrate —
-    i.e. in-use bytes.  assign_cheapest() then maps that to the correct disk
-    tier automatically.  Using raw provisioned sizes (vDisk.Capacity) inflates
-    costs by 2–5× on fleets with over-allocated disks.
+    Note: in-use (Consumed MiB / In Use MiB) paths are intentionally removed.
+    The BA uses provisioned sizes because Azure managed disk tiers are billed on
+    allocation, not consumption.  Using in-use data under-sizes storage by 2-5×.
     """
-    if vm.partition_consumed_gib > 0:
-        # Best: guest OS consumed view (most accurate for what needs to migrate)
-        gib = vm.partition_consumed_gib
-        annual_usd, _ = _vm_disk_cost([gib])
-        return annual_usd, gib
-
-    if vm.inuse_gib > 0:
-        # vInfo In Use MiB → GiB (VMware hypervisor view)
-        gib = vm.inuse_gib
-        annual_usd, _ = _vm_disk_cost([gib])
-        return annual_usd, gib
+    if vm.partition_capacity_gb > 0:
+        # Best: vPartition provisioned filesystem capacity (decimal GB)
+        gib = vm.partition_capacity_gb
+        annual_usd, _ = _vm_disk_cost([max(gib, 1.0)])
+        return annual_usd, max(gib, 1.0)
 
     if vm.disk_sizes_gib:
-        # vDisk provisioned — apply reduction factor so we don't blindly copy allocation
-        reduced_gib = sum(vm.disk_sizes_gib) * (1.0 - pb.storage_prov_reduction_factor)
-        gib = max(reduced_gib, 1.0)
+        # vDisk provisioned — no reduction factor (BA uses full provisioned)
+        gib = max(sum(vm.disk_sizes_gib), 1.0)
         annual_usd, _ = _vm_disk_cost([gib])
         return annual_usd, gib
 
     if vm.provisioned_gib > 0:
-        # vInfo Provisioned × reduction (last resort)
-        gib = max(vm.provisioned_gib * (1.0 - pb.storage_prov_reduction_factor), 1.0)
-        annual_usd, _ = _vm_disk_cost([max(gib, 1.0)])
-        return annual_usd, max(gib, 1.0)
+        # vInfo Provisioned MiB / 953.67 (last resort)
+        gib = max(vm.provisioned_gib, 1.0)
+        annual_usd, _ = _vm_disk_cost([gib])
+        return annual_usd, gib
 
     # No storage data at all — 0
     return 0.0, 0.0

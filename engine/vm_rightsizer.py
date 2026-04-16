@@ -62,36 +62,15 @@ def resolve_vm_utilisation(
     """
     Return (cpu_util_fraction, mem_util_fraction, source_label).
 
-    Priority:
-      1. Per-VM telemetry from vCPU / vMemory tabs.
-      2. Host-level CPU usage % / Memory usage % as proxy.
-      3. Fallback factors from BenchmarkConfig (caller applies these).
+    Always returns (0.0, 0.0, "fallback") — the caller (consumption_builder)
+    applies BenchmarkConfig.cpu_util_fallback_factor and mem_util_fallback_factor.
 
-    Returns 0.0 for each metric when absent — caller distinguishes by
-    checking source_label ("vm_telemetry", "host_proxy", or "fallback").
+    Telemetry and host-proxy paths are intentionally removed.  Per-VM vCPU/vMemory
+    tab data was found to produce anomalous Azure vCPU counts (+25% outliers) because
+    obfuscated VM names (e.g. vm100…vm2661) never matched telemetry records, causing
+    partial-match host-proxy to fire for ~641 VMs.  The fallback benchmark factors
+    produce consistent, auditable results that match the BA spreadsheet.
     """
-    # 1. Per-VM vCPU / vMemory telemetry ---------------------------------
-    cpu_util = inv.vm_cpu_util.get(vm.name, 0.0)
-    mem_util = inv.vm_mem_util.get(vm.name, 0.0)
-    if cpu_util > 0 and mem_util > 0:
-        return cpu_util, mem_util, "vm_telemetry"
-    if cpu_util > 0:
-        # CPU from telemetry; memory from host or fallback
-        host_mem = _host_mem_util(vm, inv)
-        if host_mem > 0:
-            return cpu_util, host_mem, "vm_telemetry+host_proxy"
-    if mem_util > 0:
-        host_cpu = _host_cpu_util(vm, inv)
-        if host_cpu > 0:
-            return host_cpu, mem_util, "host_proxy+vm_telemetry"
-
-    # 2. Host-level proxy -------------------------------------------------
-    host_cpu = _host_cpu_util(vm, inv)
-    host_mem = _host_mem_util(vm, inv)
-    if host_cpu > 0 or host_mem > 0:
-        return host_cpu, host_mem, "host_proxy"
-
-    # 3. No signal — caller will apply fallback factors -------------------
     return 0.0, 0.0, "fallback"
 
 

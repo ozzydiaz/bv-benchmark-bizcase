@@ -52,7 +52,7 @@ _CATALOG_PATH = Path(__file__).parent.parent / "data" / "azure_vm_catalog.json"
 
 # Fallback benchmark rates (match BenchmarkConfig defaults)
 _DEFAULT_VCPU_RATE = 0.048   # $/vCPU/hr  (Dv5 PAYG East US average)
-_DEFAULT_GB_RATE   = 0.018   # $/GB/month (Standard SSD approximation)
+_DEFAULT_GB_RATE   = 0.075   # $/GiB/month (Standard SSD LRS E-series approx, East US)
 
 _CACHE_DIR     = Path(".cache") / "azure_prices"
 _CACHE_TTL_SEC = 86_400   # 24 hours
@@ -246,6 +246,7 @@ def match_sku(
     preferred_family: str = "D",
     fallback_ref_price_per_hour: float = 0.0,
     secondary_tolerance: float = 0.20,
+    min_vcpu: int = 8,
 ) -> VMSku:
     """
     Return the least-cost Azure SKU satisfying target_vcpu and target_mem_gib.
@@ -298,8 +299,13 @@ def match_sku(
                                  Default 0.20 matches the headroom already baked
                                  into the target, so actual utilisation is still
                                  covered even with the relaxation applied.
+    min_vcpu : int               Minimum vCPU floor for any selected SKU regardless
+                                 of target_vcpu.  Default 8 (BA methodology).
+                                 Set to 1 to disable.
     """
-    mem_density = target_mem_gib / max(target_vcpu, 1)
+    # Apply minimum vCPU floor (BA: smallest Azure VM used is 8 vCPU)
+    effective_target_vcpu = max(target_vcpu, min_vcpu)
+    mem_density = target_mem_gib / max(effective_target_vcpu, 1)
     # CPU-skewed threshold: D-series is 4 GiB/vCPU; above 5 → memory-skewed
     _MEM_DENSITY_THRESHOLD = 5.0
 
@@ -315,7 +321,7 @@ def match_sku(
         if secondary_tolerance > 0 and best_pass1 is None:
             if mem_density < _MEM_DENSITY_THRESHOLD:
                 # CPU-skewed: memory is primary (must be covered); CPU is secondary
-                relaxed_vcpu = target_vcpu * (1.0 - secondary_tolerance)
+                relaxed_vcpu = effective_target_vcpu * (1.0 - secondary_tolerance)
                 p1_candidates = [
                     s for s in family_skus
                     if s.memory_gib >= target_mem_gib
@@ -326,7 +332,7 @@ def match_sku(
                 relaxed_mem = target_mem_gib * (1.0 - secondary_tolerance)
                 p1_candidates = [
                     s for s in family_skus
-                    if s.vcpu >= target_vcpu
+                    if s.vcpu >= effective_target_vcpu
                     and s.memory_gib >= relaxed_mem
                 ]
             if p1_candidates:
@@ -336,7 +342,7 @@ def match_sku(
         if best_pass2 is None:
             p2_candidates = [
                 s for s in family_skus
-                if s.vcpu >= target_vcpu and s.memory_gib >= target_mem_gib
+                if s.vcpu >= effective_target_vcpu and s.memory_gib >= target_mem_gib
             ]
             if p2_candidates:
                 best_pass2 = min(p2_candidates, key=lambda s: s.price_per_hour_usd)
@@ -353,7 +359,7 @@ def match_sku(
     # No priced match anywhere — try any family ignoring price == 0
     unpriced = [
         s for s in catalog
-        if s.vcpu >= target_vcpu and s.memory_gib >= target_mem_gib
+        if s.vcpu >= effective_target_vcpu and s.memory_gib >= target_mem_gib
     ]
     if unpriced:
         best = min(unpriced, key=lambda s: (s.vcpu, s.memory_gib))
@@ -361,12 +367,12 @@ def match_sku(
         best.source = "fallback"
         return best
 
-    # Absolute fallback: synthesise a D4s_v5 equivalent
+    # Absolute fallback: synthesise a D8s_v5 equivalent (respecting min_vcpu floor)
     return VMSku(
-        arm_sku_name="Standard_D4s_v5",
+        arm_sku_name="Standard_D8s_v5",
         family="D",
-        vcpu=max(target_vcpu, 4),
-        memory_gib=max(int(target_mem_gib), 16),
+        vcpu=max(effective_target_vcpu, 8),
+        memory_gib=max(int(target_mem_gib), 32),
         price_per_hour_usd=fallback_ref_price_per_hour,
         source="fallback",
     )
@@ -467,12 +473,22 @@ def _read_vm_price_cache(path: Path) -> dict[str, float] | None:
     if age > _CACHE_TTL_SEC:
         return None
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        # Reject empty or all-zero cache entries — they indicate a failed API fetch
+        # that was mistakenly cached (e.g. empty response body or HTTP error).
+        if not data or not any(v > 0 for v in data.values()):
+            _log.debug(f"[azure_sku_matcher] Rejecting empty/zero VM price cache: {path}")
+            return None
+        return data
     except Exception:
         return None
 
 
 def _write_vm_price_cache(path: Path, price_map: dict[str, float]) -> None:
+    # Never cache an empty or all-zero price map — it would poison future reads.
+    if not price_map or not any(v > 0 for v in price_map.values()):
+        _log.debug(f"[azure_sku_matcher] Skipping cache write — no priced SKUs in map")
+        return
     try:
         path.write_text(json.dumps(price_map))
     except Exception as exc:
@@ -544,7 +560,12 @@ def _read_cache(path: Path) -> dict | None:
     if age > _CACHE_TTL_SEC:
         return None
     try:
-        return json.loads(path.read_text())
+        data = json.loads(path.read_text())
+        # Reject entries with missing/zero rates — indicates a prior failed API call.
+        if not data or data.get("vcpu_rate", 0) <= 0 or data.get("gb_rate", 0) <= 0:
+            _log.debug(f"[azure_sku_matcher] Rejecting zero-rate reference cache: {path}")
+            return None
+        return data
     except Exception:
         return None
 

@@ -371,6 +371,7 @@ def _run_layer2(
     ramp_preset:  str,
     storage_mode: str,
     bm:           BenchmarkConfig,
+    sizing_mode:  str = "rightsized",
 ) -> dict | None:
     from engine.consumption_builder import build_with_validation
     from engine.rvtools_to_inputs import workload_inventory_from_rvtools
@@ -396,6 +397,7 @@ def _run_layer2(
                 storage_mode=storage_mode,
                 ramp_preset=ramp_preset,
                 vm_catalog=l1.get("vm_catalog"),
+                sizing_mode=sizing_mode,
             )
             wl = workload_inventory_from_rvtools(inv, region=region, workload_name=client_name)
             _s.update(
@@ -415,6 +417,7 @@ def _run_layer2(
         "wl":           wl,
         "ramp_preset":  ramp_preset,
         "storage_mode": storage_mode,
+        "sizing_mode":  sizing_mode,
         "bm":           bm,
     }
 
@@ -572,7 +575,9 @@ def _render_l2_override() -> None:
                 "sku_match_secondary_tolerance":      sku_tol,
             })
             smode  = "per_vm" if "Per-VM" in new_storage_sel else "aggregate"
-            result = _run_layer2(new_ramp, smode, bm_new)
+            # Preserve sizing_mode across re-runs
+            prev_szmode = l2.get("sizing_mode", "rightsized")
+            result = _run_layer2(new_ramp, smode, bm_new, sizing_mode=prev_szmode)
             if result:
                 _clear_from(3)
                 st.session_state["_l2_result"] = result
@@ -891,13 +896,25 @@ def _render_l1_checkpoint() -> None:
         ["Per-VM disk tiers (accurate)", "Fleet aggregate (fast)"],
         index=0, horizontal=True, key="_pf_storage",
     )
+    pf3, _ = st.columns(2)
+    sizing_sel = pf3.radio(
+        "Azure VM sizing",
+        ["Rightsized (recommended)", "Like-for-like (provisioned)"],
+        index=0, horizontal=True, key="_pf_sizing",
+        help=(
+            "**Rightsized**: applies utilisation × headroom factors to reduce Azure SKU size. "
+            "**Like-for-like**: matches current vCPU/vMemory directly — no reduction. "
+            "Use like-for-like to validate against the BA provisioned baseline (16,318 vCPU)."
+        ),
+    )
 
     if st.button(
         "✅ Approve Inventory — Run Rightsizing →",
         type="primary", use_container_width=True, key="_approve_l1",
     ):
         smode  = "per_vm" if "Per-VM" in storage_sel else "aggregate"
-        result = _run_layer2(ramp, smode, bm)
+        szmode = "like_for_like" if "like-for-like" in sizing_sel.lower() else "rightsized"
+        result = _run_layer2(ramp, smode, bm, sizing_mode=szmode)
         if result:
             st.session_state["_l2_result"] = result
             _set_step(2)

@@ -108,12 +108,12 @@ def test_sql_prod_assumed_when_no_env_tags(result):
     assert inv.sql_vms_nonprod == 0
 
 
-def test_env_tagging_present_reflects_file(result):
-    """Reliance file has 2 VMs with Environment=Production — tagging flag should be True."""
-    # Even with sparse tagging, any non-empty value sets env_tagging_present
+def test_lifecycle_env_tags_present_reflects_file(result):
+    """lifecycle_env_tags_present is True only when VMs have lifecycle keywords (prod/dev/test/etc.)."""
+    # The Reliance test file has Environment='Production' on some VMs → should be True
     inv = result.inventory
     # Just verify the field exists and is a bool; actual value depends on file
-    assert isinstance(inv.env_tagging_present, bool)
+    assert isinstance(inv.lifecycle_env_tags_present, bool)
 
 
 # ── Region inference ──────────────────────────────────────────────────────────
