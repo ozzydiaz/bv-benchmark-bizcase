@@ -20,7 +20,7 @@ from engine.depreciation import compute as compute_depr
 from engine.financial_case import compute as compute_fc
 from engine.outputs import compute as compute_outputs
 
-WB = "Reliance_BV Benchmark Business Case v6.xlsm"
+WB = "<reference-workbook.xlsm>"
 wb = openpyxl.load_workbook(WB, data_only=True, keep_vba=True)
 inputs = build_inputs_from_workbook(wb)
 benchmarks = BenchmarkConfig.from_yaml("data/benchmarks_default.yaml")

@@ -13,7 +13,7 @@ bm = BenchmarkConfig.from_yaml("data/benchmarks_default.yaml")
 print(f"Engine WACC:                  {bm.wacc}")
 print(f"Engine perpetual_growth_rate: {bm.perpetual_growth_rate}")
 
-wb = openpyxl.load_workbook("Reliance_BV Benchmark Business Case v6.xlsm", data_only=True, keep_vba=True)
+wb = openpyxl.load_workbook("<reference-workbook.xlsm>", data_only=True, keep_vba=True)
 sfc = wb["Summary Financial Case"]
 
 print("\n=== Summary Financial Case: all non-empty rows (cols B, G, H) ===")

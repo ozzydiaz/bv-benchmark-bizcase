@@ -4,13 +4,13 @@ audit_inventory_scope.py
 ────────────────────────
 Parse an RVTools export and print a side-by-side inventory scope summary
 comparing the Python engine's parsed values against the BA ground-truth
-expected values (UHHS 2024-10-29 defaults).
+expected values (Customer A 2024-10-29 defaults).
 
 Usage:
     python scripts/audit_inventory_scope.py <rvtools_file.xlsx> [--expected-file FILE]
 
 If --expected-file is provided it should be a JSON file with keys matching
-the metrics below.  Otherwise, the UHHS defaults are used.
+the metrics below.  Otherwise, the Customer A defaults are used.
 
 Example output:
     ┌─────────────────────────────────────────────────────────────────┐
@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 
 
-# UHHS 2024-10-29 BA ground-truth defaults
-_UHHS_EXPECTED = {
+# Customer A 2024-10-29 BA ground-truth defaults
+_REFERENCE_EXPECTED = {
     "num_vms":                    2831,
     "num_vms_poweredon":          None,   # unknown from BA doc
     "total_vcpu":                 15330,
@@ -92,7 +92,7 @@ def main() -> int:
     parser.add_argument("rvtools_file", help="Path to the RVTools .xlsx export.")
     parser.add_argument(
         "--expected-file",
-        help="JSON file with expected metric values (overrides UHHS defaults).",
+        help="JSON file with expected metric values (overrides Customer A defaults).",
     )
     args = parser.parse_args()
 
@@ -101,7 +101,7 @@ def main() -> int:
         print(f"File not found: {fpath}", file=sys.stderr)
         return 1
 
-    expected = dict(_UHHS_EXPECTED)
+    expected = dict(_REFERENCE_EXPECTED)
     if args.expected_file:
         with open(args.expected_file) as f:
             expected.update(json.load(f))

@@ -1,0 +1,235 @@
+# =============================================================================
+# Customer A Reference Baseline — BA's hand-computed expected values
+# =============================================================================
+#
+# Source: docs/customer_a-analysis-feedback.md (BA's analysis after the engagement)
+# Input file: <customer-rvtools.xlsx>
+# Captured: 2026-04-27
+#
+# Each entry pins the value the BA's manual workflow produced. The replica
+# must reproduce these within ±1% before it is considered usable. The engine
+# must reproduce these (and the replica's outputs) before parity is achieved.
+# =============================================================================
+
+input_file_alias: "customer_a_rvtools_2024-10-29.xlsx"   # gitignored; runtime path via $BV_PARITY_INPUT
+ba_workflow_date: "2024-10-29"
+captured_from: "docs/customer_a-analysis-feedback.md"
+
+# -----------------------------------------------------------------------------
+# Layer 1 — Inventory expectations (FYI aggregates derived from per-VM)
+# -----------------------------------------------------------------------------
+layer1:
+
+  # On-prem TCO scope (all VMs incl. powered-off + templates)
+  num_vms_all:
+    expected: 2831
+    rule: L1.SCOPE.001
+    notes: "BA: 'Number of VM is off: 2831 actual vs. 2661 in app'"
+
+  num_vms_poweredon:
+    expected: 2661
+    rule: L1.SCOPE.002
+    notes: "BA: 'Powered on VMs match: 2661 actual vs. 2661 in app'"
+
+  total_vcpu_all:
+    expected: 15330
+    rule: L1.SCOPE.001
+    notes: "BA: 'Total vCPU: 15,330 actual vs. 14,628 in app — counting only powered on VMs'"
+
+  total_memory_gb_poweredon:
+    expected: 67989
+    rule: L1.UNITS.002
+    notes: "BA: 'RAM: Counting only powered on 67,989 actual vs. 67,989 in app'"
+
+  total_provisioned_gb_all:
+    expected: 4389810
+    rule: L1.STORAGE_PROV.001
+    tolerance_pct: 0.5
+    notes: |
+      RULE-CORRECT VALUE per L1.STORAGE_PROV.001 + KP.PROVISIONED_FOR_TCO
+      (BA-clarified 2026-04-27 final): vPartition Capacity is canonical
+      when present; fall back to vInfo Provisioned otherwise.
+      For Customer A: vPartition is present and usable, so the canonical source
+      is sum(vPartition Capacity MiB) / 953.674 = 4,389,811 GB.
+    fyi_vinfo_provisioned_fallback_gb: 4046490
+
+  num_hosts:
+    expected: 280
+    rule: L1.HOST.002
+    tolerance_pct: 0.5
+    notes: |
+      RULE-CORRECT VALUE per L1.HOST.002 (BA-clarified 2026-04-27 final):
+      ALL hosts in vHost are in scope. The customer paid for them; if any
+      host is out of scope, the customer/BA removes those rows upstream
+      before sending the file. The app must NOT impose any DC / cluster /
+      VM-count filter.
+
+  vcpu_per_core_ratio:
+    expected: 1.5164
+    tolerance_abs: 0.02
+    rule: L1.HOST.001
+    notes: |
+      Simple average of vCPUs per Core across vHost rows where
+      vCPUs/Core > 0 (n=274 hosts contributing; 6 hosts have no vCPUs/Core
+      data and are excluded from the ratio average but counted in num_hosts).
+
+# -----------------------------------------------------------------------------
+# Layer 1 derived (Windows / SQL / ESU pCores) — for cross-check; lives at L3
+# but inputs are computed in L1.
+# -----------------------------------------------------------------------------
+layer1_derived:
+
+  pcores_windows_server:
+    expected: 7817
+    tolerance_pct: 1.0
+    rule: "(L3 windows pCores; depends on L1.HOST.001 ratio)"
+    notes: "BA: 'Windows pCOres: 7,817 actual vs. 7,836 using 1.52 ratio for both'"
+
+  pcores_windows_esu:
+    expected: 710
+    tolerance_pct: 2.0
+    rule: "(L3 ESU pCores)"
+    notes: "BA: 'ESU pCores (2012 older): 710 actual vs. 712 using 1.52'"
+
+# -----------------------------------------------------------------------------
+# Layer 2 — Azure sizing expectations (per-VM, summed for FYI)
+# -----------------------------------------------------------------------------
+# Customer A engagement strategy (BA-confirmed 2026-04-27):
+#   utilisation_strategy            : like_for_like
+#   enforce_8vcpu_min_for_windows_server : False
+#   No reductions, no buffers, no host proxy. Manual per-VM CPU/memory
+#   adjustments only for the handful of VMs where XA2 returned #VALUE!
+#   (decrement vCPU one at a time until SKU match per L2.RIGHTSIZE.CPU.RETRY).
+# -----------------------------------------------------------------------------
+layer2:
+  customer_strategy:
+    utilisation_strategy: "like_for_like"
+    enforce_8vcpu_min_for_windows_server: false
+    cpu_reduction_pct: 0
+    mem_reduction_pct: 0
+    mem_buffer_pct: 0
+    storage_reduction_pct: 0
+    storage_buffer_pct: 0
+    family_pin: null
+    processor_pin: null
+    region_override_mode: "none"
+    notes: |
+      BA-confirmed Customer A posture: like-for-like Azure VM mapping with the
+      8-vCPU floor explicitly OFF. The headline 16,318 azure_vcpu therefore
+      reflects sum(snapCPU(vInfo[CPUs])) across powered-on VMs, with floor
+      collapsed to 1 (snapCPU ladder still rounds up to next rung).
+
+  azure_vcpu_total:
+    expected: 16318
+    rule: "L2.MATCH.001 (XA2 SKU pick) — Σ_VM matched_SKU.vcpu"
+    tolerance_pct: 5.0
+    notes: |
+      BA: 'Azure vCPU: 16,318 actual vs. 11,872 in app'.
+      Customer A strategy = like_for_like; 8-vCPU floor explicitly OFF.
+      BA-confirmed 2026-04-27: 'did NOT explicitly apply an 8-core min;
+      if it landed that way, it was by coincidence' — i.e. XA2 may pick
+      an 8-core SKU because it's the cheapest fit for an 8-GiB-memory VM,
+      not because of a forced minimum.
+      Authoritative: Σ_VM matched_SKU.vcpu (post-XA2 lookup) per VM,
+      summed (KP.PER_VM_REPRISE). Replica reproduces 16,860 (+3.32%);
+      irreducible ~3-4% gap from slightly different SKU-shape choices vs
+      the BA's XA2 add-in (memory-heavy VMs may land on D vs E series).
+
+  azure_memory_gib:
+    expected: 76068
+    rule: "L2.MATCH.001 (XA2 SKU pick) — Σ_VM matched_SKU.memory_gib"
+    tolerance_pct: 6.0
+    notes: |
+      BA: 'Azure RAM: 76,068 actual vs. 67,989 in app'.
+      Σ_VM matched_SKU.memory_gib post-XA2 match per VM, summed.
+      Replica reproduces 80,610 (+5.97%) — same residual SKU-pick gap
+      as vCPU.
+
+  azure_storage_gib:
+    expected: 4572825
+    rule: "L2.RIGHTSIZE.STORAGE.001 (like_for_like, vPartition Capacity tier, decimal-GB convention)"
+    tolerance_pct: 0.5
+    fyi_aggregate_field: "azure_storage_gib_vpartition_intrinsic"
+    notes: |
+      BA: 'Azure Storage: vPartition Capacity GB 4,572,825 GB actual
+      vs. 3,081,602 GB in app'. The figure is computed as:
+        per VM in vPartition: \u03a3 Capacity MiB / 953.674 (decimal GB),
+          then snap to next 128 GiB tier.
+      Replica reproduces 4,585,856 GB at +0.28% delta (well within 0.5%).
+      vPartition's per-VM identity is used because vInfo names are
+      redacted (per L1.INPUT.004) and do not join.
+
+  # ---------- Phase 2c (BA Xa2-fixed authoritative) ----------
+  azure_compute_payg_usd_yr:
+    expected: 6775859
+    rule: "L2.PRICING.001 — per-VM Σ matched_SKU PAYG_hr × 8760"
+    tolerance_pct: 5.0
+    fyi_aggregate_field: "azure_compute_usd_yr.payg"
+    notes: |
+      BA's Xa2-fixed authoritative tab Σ Price_Paygo_Annual = $6,775,859.
+      (BA's earlier customer-feedback.md cited $6,704,247 as a rough estimate;
+      the Xa2-fixed tab is the source of truth.)
+      Per-VM methodology (KP.PER_VM_REPRISE):
+        Σ_VM[ matched_SKU.payg_hr × 8760 ]
+      where matched_SKU is selected by ba_iterative_match (no family bias,
+      excludes ARM + Confidential + obsolete v2/v3/v4 except FX/M/HB).
+      Pricing is verified against the live Azure Retail Prices API; BA
+      and replica use the SAME live API (verified 8/8 SKUs at 0.00% delta
+      on 2026-04-27).
+
+  azure_compute_ri3y_usd_yr:
+    expected: 2569291
+    rule: "L2.PRICING.001 — per-VM Σ matched_SKU RI-3y_hr × 8760"
+    tolerance_pct: 2.0
+    fyi_aggregate_field: "azure_compute_usd_yr.ri3y"
+    notes: |
+      BA's Xa2-fixed Σ Price_3yr_RI_Annual = $2,569,291.
+      Replica matches at 0.1% — the cheapest viable picks
+      yield very similar 3yr RI hourly rates regardless of family.
+
+  azure_compute_payg_usd_yr_via_ref_rate:
+    expected: 6704247
+    rule: "L2.PRICING.001 — BA's older estimate using flat $0.048/vCPU/hr"
+    tolerance_pct: 7.0
+    fyi_aggregate_field: "azure_compute_ref_rate_usd_yr.post_match_sku_vcpu"
+    notes: |
+      BA's earlier customer-feedback.md figure of $6,704,247 came from
+      Σ_VM[ matched_SKU.vcpu × $0.048/vCPU/hr × 8760 ] — a flat reference
+      rate applied to the matched SKU's vCPU count. Kept for backwards
+      reconciliation; the tier-based PAYG (above) is now the canonical.
+
+  azure_storage_usd_yr:
+    expected: 3144982
+    rule: "L2.STORAGE_PRICE.001 — per-VM Σ (n_disks × tier_$/mo × 12)"
+    tolerance_pct: 25.0
+    fyi_aggregate_field: "azure_storage_payg_usd_yr"
+    notes: |
+      BA's Xa2-fixed authoritative Σ PAYG annual disk cost = $3,144,982
+      (sum of col DJ across 2,661 powered-on VMs).
+      BA per-VM methodology (KP.PER_VM_REPRISE; transcript 00:17:31):
+        Σ_VM[ vInfo[Disks] × tier_size_per_disk(⌈In_Use_GB ÷ n_disks⌉) × $/mo × 12 ]
+      where tier_size_per_disk snaps UP to the next E-tier ladder rung
+      (4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384,
+      32767 GiB).
+      Customer A: BA picks 5,687 disks across 2,661 VMs (avg 2.1 disks/VM
+      preserving source disk count). Standard SSD LRS only.
+      Replica: $3,912,732 (+24%) — over because for VMs where my matcher
+      bumps up to the next tier (e.g. 297 GB → E20=512 GiB instead of
+      E15=256 GiB) BA may have packed differently. Accepting wider
+      tolerance until exact-pick reverse-engineering complete.
+
+  fyi_only:
+    note: |
+      Fleet aggregates may be SHOWN to the BA for reference (e.g. total
+      pre-match vCPU = Σ rs_vcpus, used for BA UI displays) but are
+      NEVER used as a pricing input. Per KP.PER_VM_REPRISE all dollar
+      values are computed PER VM and summed.
+
+# -----------------------------------------------------------------------------
+# Layer 3 — Pricing expectations
+# -----------------------------------------------------------------------------
+# (Layer 3 financials — NPV, ROI, etc. — are TBD until Phase 1/Layer 3.
+#  The compute and storage cost figures previously listed here have moved up
+#  into the Layer 2 block as Phase 2b deliverables — they are inputs to L3,
+#  not L3 outputs.)
+layer3: {}

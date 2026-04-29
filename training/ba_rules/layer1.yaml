@@ -1,0 +1,890 @@
+# =============================================================================
+# BV Benchmark — Layer 1 BA Rule Book
+# =============================================================================
+#
+# Source video : training/baseline_workflow/layer1_ingest/recording.mp4 (~12 min)
+# Source vtt   : training/baseline_workflow/layer1_ingest/transcript.vtt
+# Authored     : 2026-04-27 (initial draft, awaiting BA review)
+# Layer scope  : Ingest an RVTools workbook (any flavour) and produce an
+#                inventory snapshot suitable for both the on-prem TCO baseline
+#                and the powered-on Azure migration sizing in Layer 2.
+#
+# Schema       : see ../README.md  ("Rule book schema")
+# How to review:
+#   1. For each rule, read the `ba_action` and `citations[].excerpt`.
+#   2. If the action does not match what you (the BA) actually do, edit the rule.
+#      Anything except `engine_status` and `engine_status_note` is BA-owned.
+#   3. Mark the rule `reviewed: true` once you sign off.
+#   4. Engine team uses `engine_status` to track convergence; do not touch.
+#
+# Status legend:
+#   MATCH           — engine already implements this rule correctly.
+#   PARTIAL         — engine implements part of the rule; gap noted.
+#   DELTA           — engine deviates from BA; convergence work needed.
+#   UNIMPLEMENTED   — engine does nothing in this area today.
+#   NA              — informational only; no engine implementation expected.
+# =============================================================================
+
+layer: 1
+title: "RVTools file ingest and adaptation"
+recording_length_min: 12
+ba_signoff:
+  reviewed: true
+  reviewer: "Ozzie Diaz (BA)"
+  date: "2026-04-27"
+  notes: |
+    Initial BA review pass — clarifications captured against rules
+    L1.STORAGE_PROV.001, L1.PARTITION.001, L1.INPUT.006, L1.UTIL.001,
+    L1.UTIL.005, L1.INPUT.001, L1.INPUT.003. The new key_principles
+    section codifies the cross-cutting directives (PER-VM, MiB-default,
+    BA-approval gate before Layer 2).
+
+# =============================================================================
+# KEY PRINCIPLES — apply to every rule below; precedence over any one rule.
+# =============================================================================
+key_principles:
+
+  - id: KP.PER_VM
+    title: "All business-case math is PER-VM, not fleetwide"
+    statement: |
+      The final business case is ALWAYS computed per-VM and then summed.
+      Fleetwide aggregates (totals, averages, P95s) exist ONLY as FYI for the
+      BA in the UI. They MUST NOT be used as inputs to Layer 2 sizing or
+      Layer 3 financials. Any rule that appears to operate on fleet totals
+      must be re-stated as a per-VM operation followed by a summation.
+    enforcement: |
+      Replica and engine must both emit per_vm[] records carrying every
+      field that ever feeds a downstream calculation. Aggregate fields are
+      derived from per_vm[] only.
+
+  - id: KP.MIB_DEFAULT
+    title: "Assume MiB unless the column header explicitly states otherwise"
+    statement: |
+      RVTools (and most VMware exports) emit storage and memory in MiB.
+      Unless the resolved column header explicitly contains one of the unit
+      tokens 'MB', 'GB', 'GIB', 'GiB', 'TiB', 'TB' — assume the values are
+      in MiB. Convert to decimal GB (÷ 953.674) for Azure Retail Pricing
+      API compatibility before any downstream sizing/pricing.
+    enforcement: |
+      Header resolver returns (col_index, declared_unit) where declared_unit
+      is one of {'mib','mb','gib','gb','tib','tb','unspecified'}. Anything
+      'unspecified' is treated as 'mib'. Per-VM record stores raw_mib plus
+      derived gb_decimal so the unit decision is auditable.
+
+  - id: KP.BA_APPROVAL_GATE
+    title: "Layer 1 has an explicit BA review/approval gate before Layer 2"
+    statement: |
+      Layer 1 must produce a 'pre-final' results package that the BA reviews
+      and explicitly approves (or amends) before Layer 2 runs. Reduction
+      factors, host-proxy utilisation, fallback assumptions, and any
+      tolerances/missing-data notices must be surfaced for BA decision at
+      this gate.
+    enforcement: |
+      PipelineResult gains an `ba_review_packet` payload. UI shows it as a
+      checklist; Layer 2 cannot start until the packet is acknowledged.
+      Replica writes the equivalent payload to YAML for offline BA review.
+
+  - id: KP.MANDATORY_VINFO
+    title: "vInfo is mandatory; missing vInfo halts the workflow"
+    statement: |
+      vInfo is the only mandatory tab. Its absence (or empty content) is a
+      hard stop. Any other missing tab is a soft warning that becomes part
+      of the BA review packet with the assumption(s) and tolerance(s) used
+      to compensate.
+    enforcement: |
+      Replica/engine raise a hard error on missing or empty vInfo. All other
+      gaps become entries in `ba_review_packet.assumptions[]` with the
+      benchmark fallback applied and a 'BA: confirm or override' flag.
+
+  - id: KP.SYNONYM_HEADERS
+    title: "Header resolution uses synonym sets, never exact strings"
+    statement: |
+      Customer files use abbreviated and reordered headers. Every required
+      column is resolved against an ordered synonym list (case-insensitive,
+      whitespace/punctuation-tolerant). Approved synonym sets are listed in
+      Section A below; any addition requires a rule-book update.
+    enforcement: |
+      header_resolver.resolve(sheet, field) -> (col_index, header_text,
+      declared_unit, source_synonym).  Source synonym is logged so the BA
+      can audit which alias matched.
+
+  - id: KP.PROVISIONED_FOR_TCO
+    title: "On-prem TCO uses PROVISIONED storage; in-use is for Azure sizing only"
+    statement: |
+      For the on-premise TCO baseline (what the customer paid for and is
+      depreciating), use Provisioned storage per VM. Source preference
+      (BA-clarified 2026-04-27):
+        1. vPartition Capacity (per VM — sum partitions) WHEN AVAILABLE and
+           not visibly deprecated (rows present, capacity sums plausible).
+           This is canonical when usable.
+        2. vInfo Provisioned (per VM) when vPartition is missing or unusable.
+      For Azure managed-disk sizing in Layer 2 the BA prefers In-Use when
+      available so we do not over-provision in Azure. Both must be captured
+      per-VM in Layer 1.
+    enforcement: |
+      VMRecord carries provisioned_gb_decimal (resolved per the source
+      preference above) AND in_use_gb_decimal. The replica records
+      `provisioned_storage_source = 'vpartition' | 'vinfo'` per VM so the
+      decision is auditable. No fleet aggregate is consumed downstream —
+      Layer 3 sums per-VM.
+
+# =============================================================================
+# Section A — INPUT FILE & FLAVOUR HANDLING
+# =============================================================================
+
+rules:
+
+  - rule_id: L1.INPUT.001
+    topic: "Customer file format — be agile"
+    ba_action: |
+      RVTools is common but not exclusive. Be agile with different formatted
+      data files. Best we can do is good pattern matching, error checking,
+      and notices back to the BA when a major issue or omission of a
+      mandatory count category occurs (these are examples, not all-inclusive
+      list of conditions).
+    inputs:
+      - sheet: "(any tab — sniff structure first)"
+    output:
+      engine_field: "InputClassification (NEW): {format, confidence, mandatory_gaps[], soft_gaps[]}"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "File does not match any known format AND vInfo-shaped tab cannot be located"
+        action: "Hard stop with a BA-readable message naming the closest match."
+    citations:
+      - timestamp: "00:00:24"
+        excerpt: "there could be many different flavors of RV tools files that we'll get, and we have to be able to adapt to all those different flavors and use assumptions or fallback mechanisms"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: |
+      engine/rvtools_parser.py only detects the canonical RVTools structure.
+      Non-RVTools formats (PowerCLI, vSphere DB exports) silently produce
+      all-zero output — see SKILL Step 5 "Known Format Variants".
+      BA-clarified scope (2026-04-27): pattern matching + error checking +
+      explicit BA notices. No need to natively parse every format; just be
+      transparent about what we can/cannot do per file.
+    reviewed: true
+
+  - rule_id: L1.INPUT.002
+    topic: "Minimum required tabs"
+    ba_action: |
+      We tell the customer the minimum requested set is:
+        - vInfo       — all VMs and metadata
+        - vHost       — all physical hosts and metadata
+        - vPartition  — storage attached to hosts/used by VMs
+      vCPU and vMemory utilisation tabs are NOT required.
+    inputs:
+      - sheet: vInfo
+      - sheet: vHost
+      - sheet: vPartition
+    output:
+      engine_field: "RVToolsInventory.vhost_available (bool); presence of partition data"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "vHost tab missing"
+        action: "Use benchmark vCPU/pCore ratio (1.97) and skip host-level analytics."
+      - condition: "vPartition tab missing"
+        action: "Fall back to vInfo Provisioned MiB / In Use MiB for storage."
+    citations:
+      - timestamp: "00:01:23"
+        excerpt: "if you could please minimally include the V info tab ... The V host tab ... and the V partition tab"
+      - timestamp: "00:02:08"
+        excerpt: "do not rely on there being vCPU or vMemory there. We have to be able to adapt to at least the minimum"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: ""
+    reviewed: false
+
+  - rule_id: L1.INPUT.003
+    topic: "Below-minimum tolerance — vInfo only"
+    ba_action: |
+      vInfo is mandatory (KP.MANDATORY_VINFO); its absence stops the
+      workflow. All other missing tabs are soft warnings. Every soft
+      warning must produce: (a) a flag in the BA review packet,
+      (b) the assumption used to compensate, (c) the tolerance/loss of
+      precision the BA should expect because of the gap.
+    inputs:
+      - sheet: vInfo
+    output:
+      engine_field: "ba_review_packet.assumptions[], .missing_tabs[], .tolerances[]"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "vInfo missing or empty"
+        action: "HARD STOP — return error 'vInfo tab required; received: <list of tabs found>'."
+      - condition: "vHost missing"
+        action: "Use 1.97 vCPU/pCore benchmark; flag in review packet with note 'vHost absent — host count and ratio derived from benchmark'."
+      - condition: "vPartition missing"
+        action: "Use vInfo Provisioned (per-VM) for on-prem TCO; flag 'vPartition absent — per-volume detail unavailable; on-prem and Azure sizing both use vInfo Provisioned/In-Use'."
+      - condition: "vCPU/vMemory missing"
+        action: "Surface BA-overridable reduction factors in the review packet (KP.BA_APPROVAL_GATE)."
+    citations:
+      - timestamp: "00:02:28"
+        excerpt: "sometimes customers will not send us even that. They may send us only the V info tab with VM names"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: |
+      Engine produces a result with vInfo only, but does not currently emit a
+      structured ba_review_packet that lists missing tabs, the assumption
+      used, and the tolerance impact in one place.
+    reviewed: true
+
+  - rule_id: L1.INPUT.004
+    topic: "Redacted VM names"
+    ba_action: |
+      Customers often redact VM names — substituting numbers or random
+      strings. Ingest must not depend on VM-name semantics; it should treat
+      names as opaque keys.
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["VM"]
+    output:
+      engine_field: "VMRecord.name"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - timestamp: "00:02:48"
+        excerpt: "Sometimes customers will take the VM name and redact it to just a number or something random. We need to be able to ... adapt to that situation"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: "VM names are used only as join keys; no semantic parsing."
+    reviewed: false
+
+  - rule_id: L1.INPUT.005
+    topic: "Column position is not fixed — find by header keyword"
+    ba_action: |
+      Columns may not be in their canonical positions. Find each required
+      column by matching the *header text* against expected keywords/synonyms.
+      For example, the VM-name column "may not be column A".
+    inputs:
+      - sheet: "(any)"
+    output:
+      engine_field: "(header-driven column resolution)"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "No header match"
+        action: "Emit parse_warning naming the missing field and its keyword set."
+    citations:
+      - timestamp: "00:02:48"
+        excerpt: "Not necessarily column A, but in this example, let's say, yes, in column A is the VM name"
+      - timestamp: "00:07:36"
+        excerpt: "do not assume that it's going to be in these column locations. You have to look for the title or something close to that title"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: "Engine resolves columns by header name, not position."
+    reviewed: false
+
+  - rule_id: L1.INPUT.006
+    topic: "Column-name fuzzy matching (synonym keywords) + unit defaulting"
+    ba_action: |
+      Header text varies. Resolve every required column against a synonym
+      set, case-insensitive, whitespace/punctuation tolerant. If the
+      matched header does NOT explicitly state a unit (MB / MiB / GB / GiB),
+      assume MiB and convert to decimal GB (÷ 953.674) for the Azure Retail
+      Pricing API (KP.MIB_DEFAULT, KP.SYNONYM_HEADERS).
+
+      Approved synonym sets (additions go through this rule):
+
+        provisioned_storage:
+          - "Provisioned MiB"
+          - "Provisioned"
+          - "Capacity MiB"
+          - "Capacity"
+          - "Allocated"
+          - "Allocated MiB"
+          - "Total Provisioned"
+          - "Storage Provisioned"
+
+        in_use_storage:
+          - "In Use MiB"
+          - "In Use"
+          - "Used"
+          - "Used MiB"
+          - "Utilized"
+          - "Utilised"
+          - "Consumed"
+          - "Consumed MiB"
+
+        memory:
+          - "Memory"
+          - "Memory MiB"
+          - "Memory MB"
+          - "RAM"
+          - "RAM MiB"
+          - "Configured Memory"
+
+        vcpu:
+          - "CPUs"
+          - "vCPUs"
+          - "CPU Count"
+          - "# CPUs"
+          - "Num CPU"
+          - "NumCPU"
+
+        powerstate:
+          - "Powerstate"
+          - "Power State"
+          - "PowerState"
+          - "State"
+
+        vm_name:
+          - "VM"
+          - "VM Name"
+          - "Name"
+
+        host_ref:
+          - "Host"
+          - "VMHost"
+          - "ESX Host"
+          - "ESXi Host"
+
+        os_config:
+          - "OS according to the configuration file"
+          - "OS (Configured)"
+          - "GuestOS"
+          - "Guest OS"
+          - "OS"
+
+        os_tools:
+          - "OS according to the VMware Tools"
+          - "OS (Tools)"
+          - "Tools OS"
+
+        host_cores:
+          - "# Cores"
+          - "Cores"
+          - "Total Cores"
+          - "Physical Cores"
+
+        vcpus_per_core:
+          - "vCPUs per Core"
+          - "vCPU per Core"
+          - "vCPU/Core"
+
+        host_cpu_usage_pct:
+          - "CPU usage %"
+          - "CPU usage"
+          - "% CPU"
+          - "CPU %"
+
+        host_mem_usage_pct:
+          - "Memory usage %"
+          - "Memory usage"
+          - "% Memory"
+          - "Mem %"
+    inputs:
+      - sheet: "(any)"
+    output:
+      engine_field: "header_resolver (NEW module): synonym map → (col, header_text, declared_unit, matched_synonym)"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "No synonym matches"
+        action: "Emit ba_review_packet entry naming the field, the synonyms tried, and the headers actually present in the sheet."
+    citations:
+      - timestamp: "00:07:48"
+        excerpt: "It might say provisioned, it might say capacity, it may or may not include MIB in the title, but assume that if it came from RV Tools, it is MIB"
+      - timestamp: "00:08:11"
+        excerpt: "same thing with in use. Usually it's in use, it may or may not include the MIB. Maybe it might say utilized. So we have to use similar keywords or analogous keywords"
+    reference_expected: null
+    engine_status: DELTA
+    engine_status_note: |
+      Today engine uses exact-string column lookups (`_col_index` on canonical
+      names like "Provisioned MiB", "In Use MiB", "Capacity MiB"). New
+      header_resolver module needed.
+    reviewed: true
+
+# =============================================================================
+# Section B — VM INVENTORY SCOPE
+# =============================================================================
+
+  - rule_id: L1.SCOPE.001
+    topic: "On-prem inventory includes powered-on AND powered-off VMs"
+    ba_action: |
+      For the on-premise inventory (TCO baseline), count BOTH powered-on
+      and powered-off VMs. Rationale: customer has paid for the
+      infrastructure; powered-off VMs still depreciate.
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["Powerstate"]
+    output:
+      engine_field: "RVToolsInventory.num_vms"
+      excel_cell: "1-Client Variables!D39"
+    fallbacks: []
+    citations:
+      - timestamp: "00:11:07"
+        excerpt: "we also want to collect all the VMs for the on-premise inventory. So powered on and powered off needs to be collected and counted in the overall inventory"
+      - timestamp: "00:11:29"
+        excerpt: "they've already paid for that infrastructure, and irrespective of whether it's sitting there in a powered off state, it's still there depreciating"
+    reference_expected: 2831
+    engine_status: MATCH
+    engine_status_note: "v1.3.0 (H1, H2): num_vms = num_vms_all incl. templates + powered-off."
+    reviewed: false
+
+  - rule_id: L1.SCOPE.002
+    topic: "Azure mapping uses powered-on VMs only"
+    ba_action: |
+      Layer 2's Azure least-cost VM mapping considers ONLY powered-on VMs.
+      Powered-off VMs do not generate Azure consumption.
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["Powerstate"]
+    output:
+      engine_field: "RVToolsInventory.num_vms_poweredon, vm_records[]"
+      excel_cell: "n/a (used in Layer 2)"
+    fallbacks: []
+    citations:
+      - timestamp: "00:11:41"
+        excerpt: "It will be a different situation for the next layer of processing for doing the least cost Azure VM mapping"
+    reference_expected: 2661
+    engine_status: MATCH
+    engine_status_note: ""
+    reviewed: false
+
+  - rule_id: L1.SCOPE.003
+    topic: "Template VMs"
+    ba_action: |
+      Templates are powered-off VM images that still occupy host capacity.
+      Treat them like powered-off VMs for the on-prem inventory count.
+      [BA review: please confirm — the transcript does not explicitly
+      address templates. Engine currently includes them in num_vms.]
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["Template"]
+    output:
+      engine_field: "RVToolsInventory.num_vms (includes templates)"
+      excel_cell: "1-Client Variables!D39"
+    fallbacks: []
+    citations:
+      - timestamp: "(implied by L1.SCOPE.001 + 'they've already paid')"
+        excerpt: "(no explicit mention in Layer 1 transcript — escalate to BA)"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: "Engine v1.3.0 includes templates in num_vms; excludes from vm_records."
+    reviewed: false
+
+# =============================================================================
+# Section C — UTILISATION TELEMETRY (CPU / MEMORY / STORAGE)
+# =============================================================================
+
+  - rule_id: L1.UTIL.001
+    topic: "Utilisation telemetry can come from vInfo, vHost, OR vPartition"
+    ba_action: |
+      From time to time we get lucky and receive a full RVTools export
+      including per-VM CPU/Memory utilisation columns (in vInfo and/or
+      dedicated vCPU/vMemory tabs). When present, use them for per-VM
+      right-sizing in Layer 2.
+
+      When absent, fall back to BA-overridable reduction factors. Surface
+      the proposed defaults in the BA review packet (KP.BA_APPROVAL_GATE)
+      so the BA can approve or modify them BEFORE Layer 2 runs.
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["CPU usage", "Memory usage", "% CPU", "% Memory"]
+      - sheet: vCPU
+      - sheet: vMemory
+      - sheet: vHost
+      - sheet: vPartition
+    output:
+      engine_field: "per_vm[].cpu_util_pct, per_vm[].mem_util_pct, ba_review_packet.proposed_reduction_factors"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "No per-VM utilisation source present"
+        action: "Surface default reduction factors (CPU & memory) in the BA review packet for approval/override before Layer 2."
+      - condition: "vHost CPU usage % present (and per-VM absent)"
+        action: "See L1.UTIL.005 — present host-proxy as an option to the BA."
+    citations:
+      - timestamp: "00:03:14"
+        excerpt: "Another aspect is utilization telemetry or utilization metadata in either the vinfo and or the vhost and or vpartition"
+      - timestamp: "00:04:39"
+        excerpt: "If we don't have that, then we have to have an assumption or fallback percentage of utilization, and that can be codified in the app"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: |
+      Engine reads vCPU and vMemory tabs (per-VM) and vHost CPU/Mem usage %
+      (per-host). Two gaps: (a) no scan of vInfo for embedded per-VM CPU/Mem
+      usage columns; (b) no BA review packet that surfaces the proposed
+      reduction factors for explicit approval before Layer 2.
+    reviewed: true
+
+  - rule_id: L1.UTIL.002
+    topic: "Purpose of CPU utilisation"
+    ba_action: |
+      CPU utilisation enables right-sizing the future Azure VM (Layer 2's
+      least-cost match). Without it, Azure VMs will be sized to provisioned
+      vCPUs (like-for-like) — which over-provisions the customer.
+    inputs:
+      - sheet: vCPU
+        column_keywords: ["Overall MHz", "Max MHz"]
+    output:
+      engine_field: "RVToolsInventory.cpu_util_p95, vm_cpu_util"
+      excel_cell: "n/a (used in Layer 2 rightsizing)"
+    fallbacks: []
+    citations:
+      - timestamp: "00:04:01"
+        excerpt: "the objective of having utilization for the CPUs is to be able to right size ... for the future state Azure Virtual Machine mapping"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: ""
+    reviewed: false
+
+  - rule_id: L1.UTIL.003
+    topic: "Memory utilisation handled the same way as CPU"
+    ba_action: |
+      Memory utilisation is collected and used identically to CPU
+      utilisation — both for right-sizing in Layer 2 and for fallback
+      reporting when absent.
+    inputs:
+      - sheet: vMemory
+    output:
+      engine_field: "RVToolsInventory.memory_util_p95, vm_memory_util"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - timestamp: "00:04:51"
+        excerpt: "The same thing goes for memory"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: ""
+    reviewed: false
+
+  - rule_id: L1.UTIL.004
+    topic: "Fallback utilisation percentages — must be codified"
+    ba_action: |
+      When per-VM CPU or memory utilisation is absent, use a fallback
+      percentage codified in the application. The exact value should be
+      visible to the BA in the UI (so it can be overridden).
+      [BA review: please confirm canonical fallback values — Layer 1
+      transcript does not name them; Layer 3 mentions benchmark assumptions.]
+    inputs: []
+    output:
+      engine_field: "PipelineBenchmarks.cpu_util_fallback_factor, .memory_rightsizing_headroom_factor"
+      excel_cell: "Benchmark Assumptions!D8, D12"
+    fallbacks: []
+    citations:
+      - timestamp: "00:04:39"
+        excerpt: "If we don't have that, then we have to have an assumption or fallback percentage of utilization, and that can be codified in the app"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: "Codified in engine/models.py PipelineBenchmarks; surfaced in intake page."
+    reviewed: false
+
+  - rule_id: L1.UTIL.005
+    topic: "Host CPU usage % may proxy for per-VM utilisation — BA decides"
+    ba_action: |
+      When per-VM utilisation is absent but vHost has CPU/Memory usage %,
+      compute the host-proxy values (host % applied to each VM running on
+      that host) and PRESENT them as an OPTION in the BA review packet.
+      vHost utilisation might be better than nothing or making something up.
+      The BA decides whether to use host-proxy, BA-set fallback factors, or
+      a hybrid — before Layer 2 starts (KP.BA_APPROVAL_GATE).
+    inputs:
+      - sheet: vHost
+        column_keywords: ["CPU usage %", "CPU usage", "Memory usage %"]
+    output:
+      engine_field: "per_vm[].host_proxy_cpu_pct (always populated when host data exists), ba_review_packet.utilisation_options[]"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - timestamp: "00:09:27"
+        excerpt: "it's debatable as to whether we can apply the CPU usage percentage ... from the V host ... to those VMs running on that host. That's one way to do it, and we should calculate it and present that out to the business analyst"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: |
+      Engine captures host_cpu_util but the host-proxy application path was
+      disabled in v1.3.0 (M1). BA-clarified scope (2026-04-27): always
+      compute host-proxy when host data exists; surface as a BA-selectable
+      option in the review packet; never apply silently.
+    reviewed: true
+
+# =============================================================================
+# Section D — UNIT CONVERSIONS
+# =============================================================================
+
+  - rule_id: L1.UNITS.001
+    topic: "RVTools storage values are MiB — convert to decimal GB"
+    ba_action: |
+      All RVTools storage and memory values are in MiB (binary mebibytes).
+      Convert to **gigabytes decimal** (GB) for Azure Retail Price API
+      compatibility. Conversion factor: 1 GB = 953.674 MiB.
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["Memory", "Provisioned MiB", "In Use MiB"]
+      - sheet: vPartition
+        column_keywords: ["Capacity MiB", "Consumed MiB"]
+    output:
+      engine_field: "MIB_TO_GB constant; total_vmemory_gb, total_storage_*_gb"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - timestamp: "00:05:09"
+        excerpt: "memory in the RV tools is generally provided in a MIB or MIB format. We need to be able to ... convert that to gigabytes decimal so that the retail pricing API for Azure can be mapped"
+      - timestamp: "00:06:35"
+        excerpt: "it is in MIB format. So that would need to be converted to gigabytes, decimal, for ultimately in the next layer"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: "MIB_TO_GB = 1 / 953.67 in engine/rvtools_parser.py."
+    reviewed: false
+
+  - rule_id: L1.UNITS.002
+    topic: "RVTools memory column ('Memory') is MB, not MiB"
+    ba_action: |
+      [BA review needed: transcript says 'memory in the RV tools is generally
+      provided in MIB'. The engine treats vInfo's "Memory" column as decimal
+      MB and divides by 1024 to get GB (binary GiB). vPartition Capacity is
+      MiB and divides by 953.67 to get decimal GB. Please confirm which
+      conversion is correct for the Memory column.]
+    inputs:
+      - sheet: vInfo
+        column_keywords: ["Memory", "Memory MiB"]
+    output:
+      engine_field: "RVToolsInventory.total_vmemory_gb"
+      excel_cell: "1-Client Variables!D41"
+    fallbacks: []
+    citations:
+      - timestamp: "00:05:00"
+        excerpt: "memory in the RV tools is generally provided in a MIB or MIB format"
+    reference_expected: 67989
+    engine_status: PARTIAL
+    engine_status_note: |
+      Engine uses MB_TO_GB = 1/1024 for vInfo Memory (treats as binary MiB→GiB).
+      Customer A comparison shows total_vmemory_gb of 67,989 matches the BA's number,
+      so the current conversion happens to be right for that file. Flag for
+      BA confirmation: should it be MIB_TO_GB (÷ 953.674) for true decimal GB
+      consistency with storage?
+    reviewed: false
+
+# =============================================================================
+# Section E — ON-PREM STORAGE (TCO BASELINE)
+# =============================================================================
+
+  - rule_id: L1.STORAGE_PROV.001
+    topic: "On-prem TCO storage = PER-VM vInfo Provisioned, summed"
+    ba_action: |
+      For the on-premise TCO count, use the PER-VM Provisioned value from
+      vInfo (column resolved via synonyms; KP.SYNONYM_HEADERS). Convert
+      MiB → decimal GB (÷ 953.674) per KP.MIB_DEFAULT. Rationale: customer
+      paid for and is depreciating the full provisioned capacity,
+      irrespective of what is actually in use.
+
+      In-use storage is captured separately PER VM (L1.STORAGE_INUSE.001)
+      and used ONLY for Azure managed-disk least-cost matching in Layer 2,
+      when in-use data is available. Per KP.PROVISIONED_FOR_TCO.
+
+      Per KP.PER_VM: this is computed PER VM and SUMMED for the FYI total.
+      No fleet aggregate is consumed downstream.
+    inputs:
+      - sheet: vInfo
+        synonym_set: provisioned_storage
+    output:
+      engine_field: "per_vm[].provisioned_gb_decimal; aggregated FYI: total_storage_provisioned_gb"
+      excel_cell: "1-Client Variables!D42"
+    fallbacks:
+      - condition: "vInfo Provisioned column missing entirely"
+        action: "Emit ba_review_packet entry; do NOT silently substitute In-Use; require BA decision (override or proceed without storage TCO)."
+    citations:
+      - timestamp: "00:05:47"
+        excerpt: "We need to account for all the physical infrastructure that's on in the data center that's on-premise, because the customer paid for it, it is depreciating the full extent of that infrastructure"
+      - timestamp: "00:06:06"
+        excerpt: "for the on-premise counts, we use the provision MIB metadata per VM in vInfo"
+    reference_expected: 4046490            # rule-correct: vInfo Provisioned MiB / 953.674
+    engine_status: DELTA
+    engine_status_note: |
+      DELTA CONFIRMED by parity harness 2026-04-27:
+        replica:  4,046,490.62 GB  (matches BA-rule-correct value at 0.00%)
+        engine:   3,343,420.97 GB  (-17.37% vs replica/rule-correct)
+        BA spreadsheet cited 4,389,810 GB (= vPartition Capacity / 953.674)
+      Engine summary `total_storage_in_use_gb` uses In Use MiB, not
+      Provisioned. Fix: introduce `total_storage_provisioned_gb` (sum of
+      per-VM `provisioned_gib`) and switch Layer 3 TCO baseline to use it.
+    reviewed: true
+
+  - rule_id: L1.STORAGE_INUSE.001
+    topic: "In-use storage — PER-VM, used by Layer 2 ONLY when available"
+    ba_action: |
+      Capture per-VM in-use storage (synonym-resolved, MiB-default → decimal
+      GB per KP.MIB_DEFAULT) when present. This is consumed ONLY by Layer 2
+      Azure managed-disk least-cost matching, IF available — to avoid
+      over-provisioning in Azure for storage the customer isn't using.
+
+      It is NEVER used for the on-prem TCO storage baseline (that's
+      Provisioned per L1.STORAGE_PROV.001). Per KP.PROVISIONED_FOR_TCO.
+
+      vPartition is NOT relied upon (per BA clarification of
+      L1.PARTITION.001 — vPartition is FYI-only when present; L2 uses
+      vInfo In-Use as the canonical per-VM in-use source).
+    inputs:
+      - sheet: vInfo
+        synonym_set: in_use_storage
+    output:
+      engine_field: "per_vm[].in_use_gb_decimal; aggregated FYI: total_storage_in_use_gb"
+      excel_cell: "n/a (used in Layer 2)"
+    fallbacks:
+      - condition: "In-use column absent"
+        action: "Layer 2 falls back to per-VM Provisioned for managed-disk sizing; flag in BA review packet."
+    citations:
+      - timestamp: "00:06:51"
+        excerpt: "we also need to capture the in use MIB, the in use storage, have to do the same GB decimal conversion. This tells us the utilization of that storage. So that will need to be put away for, again, the next major step, the next layer"
+      - timestamp: "00:07:13"
+        excerpt: "for finding managed disk sizes to meet the in use MIB, but in gigabytes decimal for ... for price matching in the Azure Retail Price API"
+    reference_expected: null
+    engine_status: MATCH
+    engine_status_note: |
+      Engine captures in-use storage and exposes it via total_storage_in_use_gb.
+      However it currently *also* uses this same value as the on-prem TCO
+      number (see L1.STORAGE_PROV.001 delta) — must be decoupled.
+    reviewed: true
+
+# =============================================================================
+# Section F — vHost AND vPartition DATA
+# =============================================================================
+
+  - rule_id: L1.HOST.001
+    topic: "vHost provides physical host metadata"
+    ba_action: |
+      vHost contains the list of physical hosts. We use it for:
+        - host count
+        - vCPU/pCore ratio
+        - host-level CPU usage % (see L1.UTIL.005)
+        - region inference (datacenter, domain, time-zone, GMT offset)
+    inputs:
+      - sheet: vHost
+        column_keywords: ["Host", "# Cores", "vCPUs per Core", "Datacenter", "Domain", "Time Zone Name", "GMT Offset"]
+    output:
+      engine_field: "RVToolsInventory.num_hosts, .vcpu_per_core_ratio, .datacenter_*, .timezone_names, .gmt_offsets, .domain_names"
+      excel_cell: "1-Client Variables!D54, D55"
+    fallbacks:
+      - condition: "vHost missing"
+        action: "Use 1.97 vCPU/pCore benchmark (per Layer 3)."
+    citations:
+      - timestamp: "00:08:42"
+        excerpt: "in VHost we have all of the physical hosts"
+    reference_expected: 242
+    engine_status: MATCH
+    engine_status_note: ""
+    reviewed: false
+
+  - rule_id: L1.HOST.002
+    topic: "In-scope hosts = ALL hosts in vHost (customer/BA controls scope upstream)"
+    ba_action: |
+      For the on-prem count, use the count of ALL hosts in the vHost tab.
+      Rationale (BA-clarified 2026-04-27): the customer has spent money on
+      every host that appears in vHost; if a host is in scope from the
+      customer's perspective, it is in scope for the BA. Any out-of-scope
+      filtering is the responsibility of the customer or BA upstream of the
+      file (i.e. by removing those rows before sending the file). The app
+      MUST NOT impose any datacenter / cluster / VM-count filter.
+
+      Per KP.PER_VM, num_hosts is FYI only. Per-VM business-case math
+      already covers the host's costs via per-VM aggregation.
+    inputs:
+      - sheet: vHost
+        column_keywords: ["Host"]
+    output:
+      engine_field: "RVToolsInventory.num_hosts (= count of vHost rows)"
+      excel_cell: "1-Client Variables!D54"
+    fallbacks:
+      - condition: "vHost missing"
+        action: "Use vCPU/pCore = 1.97 benchmark; flag in BA review packet (host count unknown)."
+    citations:
+      - timestamp: "(BA clarification 2026-04-27)"
+        excerpt: "for the purposes of on-premise counts as it relates to what the customer has spent money on hardware et al, need to include all hosts (if we have vHost tab) so 280 is the right number ... If the hosts are there, then it will be considered in-scope by the customer hence in-scope by the BA. If it were out-of-scope, it's the customer or BAs responsibility to remove"
+    reference_expected: 280
+    engine_status: DELTA
+    engine_status_note: |
+      Engine v1.3.0 H3 fix counts only hosts that have ≥1 powered-on VM
+      (cross-matched against vInfo). Per BA: revert that filter — use
+      ALL vHost rows as the count. Customer A rule-correct = 280.
+    reviewed: true
+
+  - rule_id: L1.PARTITION.001
+    topic: "vPartition is the CANONICAL on-prem provisioned storage source when present"
+    ba_action: |
+      vPartition, when present and usable, is the canonical source for the
+      per-VM on-premise provisioned storage (L1.STORAGE_PROV.001). When
+      vPartition is missing or visibly deprecated, fall back to vInfo
+      Provisioned per VM. Per KP.PROVISIONED_FOR_TCO.
+
+      vPartition data is grouped by VM name (multiple partition rows per
+      VM are summed). Per-volume detail is also surfaced in the BA review
+      packet for context.
+
+      CRITICAL (KP.PER_VM): the business case is computed PER VM and SUMMED.
+      Fleetwide aggregates are FYI only. NEVER use a fleet aggregate as a
+      direct input to Layer 2 sizing or Layer 3 financials.
+    inputs:
+      - sheet: vPartition
+        column_keywords: ["Capacity MiB", "Capacity", "Consumed MiB", "Consumed"]
+    output:
+      engine_field: "per_vm[].provisioned_gb_decimal (when source='vpartition'), per_vm[].partition_volumes[]"
+      excel_cell: "n/a (per-VM only)"
+    fallbacks:
+      - condition: "vPartition missing"
+        action: "Per-VM provisioned falls back to vInfo Provisioned (L1.STORAGE_PROV.001). Note in BA review packet."
+    citations:
+      - timestamp: "00:10:39"
+        excerpt: "there's a lot of data in the V partition across all the drives and the partitions on the drives as they pertain to what's attached to the physical host related back to the VMs"
+      - timestamp: "(BA clarification 2026-04-27)"
+        excerpt: "if vPartition is available and not terribly depracated, this can be considered canonical; else, if vPartition is missing, we need to work with what we have in vInfo"
+    reference_expected: 4389810           # = sum of vPartition Capacity MiB / 953.674
+    engine_status: DELTA
+    engine_status_note: |
+      Engine currently treats vPartition as PARTIAL/secondary and uses
+      In-Use for the TCO summary. Required change: use vPartition Capacity
+      (per VM, summed by partitions) as the primary provisioned source
+      for the on-prem TCO count. Customer A rule-correct = 4,389,810 GB.
+    reviewed: true
+
+# =============================================================================
+# Section G — METADATA HANDED OFF TO LAYER 2
+# =============================================================================
+
+  - rule_id: L1.HANDOFF.001
+    topic: "Layer 1 emits a structured inventory snapshot — PER-VM authoritative"
+    ba_action: |
+      Layer 1's output is the input to Layer 2 AFTER the BA review/approval
+      gate (KP.BA_APPROVAL_GATE). Required content:
+
+        per_vm[]:                           # AUTHORITATIVE per KP.PER_VM
+          - name (opaque key)
+          - powerstate                      # for L2 in-scope filter
+          - is_template
+          - vcpu                            # provisioned vCPU
+          - memory_gb_decimal               # MiB-default → GB
+          - provisioned_gb_decimal          # on-prem TCO storage source
+          - in_use_gb_decimal               # L2 Azure-disk sizing (when present)
+          - cpu_util_pct (when present)
+          - mem_util_pct (when present)
+          - host_name
+          - host_proxy_cpu_pct (when host data present)
+          - host_proxy_mem_pct (when host data present)
+          - os_config / os_tools (raw strings)
+
+        fyi_aggregates:                     # FYI ONLY — never inputs downstream
+          - num_vms_all, num_vms_poweredon, num_vms_template
+          - total_vcpu_all / _poweredon
+          - total_memory_gb_all / _poweredon
+          - total_provisioned_gb_all / _poweredon
+          - total_in_use_gb_all / _poweredon
+
+        host_metadata: { … }
+
+        ba_review_packet:                   # KP.BA_APPROVAL_GATE
+          - missing_tabs[]
+          - assumptions[]                   # what fallback was used
+          - tolerances[]                    # expected loss of precision
+          - proposed_reduction_factors      # for BA approve/override
+          - utilisation_options[]           # host-proxy vs flat factor
+          - synonym_matches[]               # which alias matched per field
+    inputs: []
+    output:
+      engine_field: "engine.rvtools_to_inputs.PipelineResult (extended per this rule)"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - timestamp: "00:10:07"
+        excerpt: "There's also other metadata that we'll be capturing, but we'll talk about that in the next section"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: |
+      Today's PipelineResult lacks: ba_review_packet, per_vm[].provisioned_gb_decimal
+      (only provisioned_gib stored; not summed), per_vm[].in_use_gb_decimal,
+      per_vm[].host_proxy_cpu_pct/mem_pct, synonym_matches audit trail.
+    reviewed: true

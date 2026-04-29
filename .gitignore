@@ -34,3 +34,12 @@ archive/
 # Secrets
 *.env
 secrets.toml
+
+# Per-VM replica dumps and parity reports — contain real customer hostnames.
+# Always regenerated locally from the gitignored input; never commit them.
+training/baselines/*/replica_per_vm.yaml
+training/baselines/*/replica_outputs.yaml
+training/baselines/*/parity_report.md
+training/baselines/*/replica_outputs_l2.yaml
+training/baselines/*/parity_report_l2.md
+training/baselines/*/replica_per_vm_l2.yaml

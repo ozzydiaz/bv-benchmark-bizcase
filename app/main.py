@@ -27,7 +27,7 @@ st.set_page_config(
 st.sidebar.title("Navigation")
 page = st.sidebar.radio(
     "Go to",
-    ["⚡ Agent Intake", "1 · Client Intake", "2 · Consumption Plan", "3 · Benchmarks", "4 · Results", "5 · Export", "🔍 Fact Checker"],
+    ["⚡ Agent Intake", "1 · Client Intake", "2 · Consumption Plan", "2.5 · BA Approval Gate", "3 · Benchmarks", "4 · Results", "5 · Export", "🔍 Fact Checker"],
 )
 
 if page == "⚡ Agent Intake":
@@ -39,6 +39,9 @@ elif page == "1 · Client Intake":
 elif page == "2 · Consumption Plan":
     from app.pages import consumption
     consumption.render()
+elif page == "2.5 · BA Approval Gate":
+    from app.pages import ba_approval
+    ba_approval.render()
 elif page == "3 · Benchmarks":
     from app.pages import benchmarks
     benchmarks.render()

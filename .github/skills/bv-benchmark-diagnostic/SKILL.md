@@ -372,7 +372,7 @@ that cover the entire estate.  A template is a frozen VM image that still
 occupies vCPU/memory allocations on the host until deleted.  The BA spreadsheet
 cell `'1-Client Variables'!D39` counts all VMs regardless of power state.
 
-**UHHS EXPECTED (2024-10-29):** `num_vms = 2,831`, `total_vcpu = 15,330`.
+**Customer A EXPECTED (2024-10-29):** `num_vms = 2,831`, `total_vcpu = 15,330`.
 
 ### Scope 2 — Powered-On Provisioned (Azure migration sizing)
 
@@ -384,7 +384,7 @@ Used for: `num_vms_poweredon`, `total_vcpu_poweredon`, `total_vmemory_gb_powered
 **Why powered-off excluded:** Powered-off VMs are not migrated to Azure unless
 the customer explicitly says so.  Azure pricing is based on running instances.
 
-**UHHS EXPECTED:** `num_vms_poweredon` ≈ 2,618 (2,831 − templates − powered-off).
+**Customer A EXPECTED:** `num_vms_poweredon` ≈ 2,618 (2,831 − templates − powered-off).
 
 ### Scope 3 — Per-VM Azure Cost Sizing (rightsized or like-for-like)
 
@@ -393,12 +393,12 @@ Used for: `azure_vcpu`, `azure_memory_gb`, `azure_storage_gb`, `ConsumptionPlan`
 **Includes:** powered-on, non-template VMs from `vm_records[]`, after applying
 utilisation × headroom reduction (rightsized) or direct provisioned match (like-for-like).
 
-**UHHS EXPECTED (like-for-like):** `azure_vcpu ≈ 16,318` (all provisioned vCPUs
+**Customer A EXPECTED (like-for-like):** `azure_vcpu ≈ 16,318` (all provisioned vCPUs
 snapped up to 8-core minimum SKU, not reduced by utilisation).
 
 ### Quick-check table
 
-| Field | Scope | Expected UHHS value |
+| Field | Scope | Expected Customer A value |
 |-------|-------|---------------------|
 | `inv.num_vms` | All-VM (incl. templates) | 2,831 |
 | `inv.total_vcpu` | All-VM (incl. templates) | 15,330 |

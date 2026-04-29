@@ -1,0 +1,1024 @@
+# =============================================================================
+# BV Benchmark — Layer 2 BA Rule Book
+# =============================================================================
+#
+# Layer scope : Per-VM Azure SKU least-cost matching, with rightsizing across
+#               CPU / Memory / Storage and pricing offers (PAYG, RI-1y, RI-3y,
+#               SP-1y, SP-3y).
+#
+# Authoritative sources (DUAL-CITATION REQUIRED):
+#   1. Microsoft Azure R&D — "VMware/OnPrem to Azure Mappings" deck.
+#      Verbatim formulas captured at:
+#        training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md
+#      Anchors used: R&D.SLIDE7.CPU.*, R&D.SLIDE8.MEMORY.*, R&D.SLIDE9.STORAGE.*
+#      Adopted 2026-04-27 because the colleague's R&D-sanctioned formulas
+#      are defensible and replace the BA's previous static "made-up" reduction
+#      factors.
+#   2. BA Layer 2 transcript:
+#        training/baseline_workflow/layer2_azure_match/transcript.vtt
+#      Cited by [HH:MM:SS] timestamp + verbatim excerpt.
+#
+# Every rule below must cite BOTH sources where applicable. When the two
+# sources conflict, the conflict is recorded explicitly under
+# `source_conflict` and resolved in `resolution`. Examples in this draft:
+#   - L2.RIGHTSIZE.CPU.WINDOWS_FLOOR  (BA-specific carve-out absent from R&D)
+#   - L2.RIGHTSIZE.STORAGE.MULTI_DISK (BA's per-disk decomposition vs single sum)
+#
+# Schema   : same as ../README.md (rule book schema).
+# Status   : MATCH | PARTIAL | DELTA | UNIMPLEMENTED | NA
+# =============================================================================
+
+layer: 2
+title: "Per-VM Azure SKU least-cost matching with R&D-sanctioned rightsizing"
+recording_length_min: 30
+ba_signoff:
+  reviewed: true
+  reviewer: "Ozzie Diaz (BA)"
+  date: "2026-04-27"
+  notes: |
+    Initial Layer 2 review pass. BA-confirmed clarifications captured:
+    - Strategy enum extended: per_vm_telemetry, host_proxy, flat_reduction,
+      like_for_like, ba_fallback. Selection precedence + Customer A-historical
+      strategy documented in KP.STRATEGY_PRECEDENCE.
+    - 8-vCPU floor flag DEFAULTS TO FALSE (BA's preferred posture is to
+      get the strongest defensible business case; floor is opt-in via the
+      L1 review packet so the BA can show the customer both with and
+      without strict licensing enforcement).
+    - Last-ditch "Ozzie's guess" reduction defaults codified in
+      KP.BA_FALLBACK_REDUCTIONS — cpu=60% reduction (40% retained),
+      mem=40% reduction (60% retained), storage=20% reduction (80%
+      retained). Editable per engagement.
+
+# =============================================================================
+# KEY PRINCIPLES — apply to every rule below; precedence over any one rule.
+# =============================================================================
+key_principles:
+
+  - id: KP.PER_VM_REPRISE
+    title: "Layer 2 inherits Layer 1's PER-VM principle"
+    statement: |
+      Per L1.KP.PER_VM, all sizing and pricing decisions in Layer 2 are made
+      PER VM and SUMMED. Fleet aggregates are FYI only and never used as a
+      sizing or pricing input.
+    enforcement: |
+      Layer 2 input is per_vm[] from Layer 1. Output is per_vm_l2[] with
+      (sku_name, vcpu, memory_gib, disk_gib, payg_usd_yr, ri1y_usd_yr,
+      ri3y_usd_yr, sp1y_usd_yr, sp3y_usd_yr, family, processor, region).
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:04:49"
+        excerpt: "we are doing per VM pricing and summing up the Azure consumption revenue. We are not doing fleet wide because that is too imprecise."
+
+  - id: KP.AZURE_RD_RIGHTSIZING_v1
+    title: "Adopt R&D-sanctioned canonical rightsizing formulas verbatim"
+    statement: |
+      All CPU, Memory and Storage rightsizing math follows the Microsoft
+      Azure R&D "VMware/OnPrem to Azure Mappings" deck (anchors
+      R&D.SLIDE7.*, R&D.SLIDE8.*, R&D.SLIDE9.*). BA-specific carve-outs are
+      additive guards on top of the R&D formulas, never replacements. Every
+      affected rule cites both the R&D anchor and the BA transcript.
+    enforcement: |
+      Layer 2 replica implements the formulas as named functions
+      (`rd_slide7_cpu_default`, `rd_slide7_cpu_user`, …) so the source-of-
+      truth is one-to-one with the canonical document.
+    citations:
+      - source: "User instruction to engineering"
+        date: "2026-04-27"
+        excerpt: "my colleague's implemention (she's in R&D) is defensible vs the fallback 'reduction factor' static numbers I had originally are made up. let's ensure to annotate everywhere we are following the R&D-sanctioned rightsizing calculation."
+
+  - id: KP.HOSTPROXY_GATE
+    title: "R&D's CPU default uses host-proxy — gate behind BA approval"
+    statement: |
+      R&D.SLIDE7.CPU.DEFAULT multiplies vInfo[CPUs] by vHost[CPU Usage %]
+      with a `max(…, 1)` floor. This is exactly the path our engine
+      disabled in v1.3.0 M1 (it produced 836 over-sized SKU matches in the
+      Customer A sample due to noisy-neighbour distortion and zero-host% collapse
+      to min_vcpus). Per L1.UTIL.005 BA-clarified: the host-proxy path is
+      OFFERED to the BA in the L1 review packet and only applied if the BA
+      explicitly accepts.
+    enforcement: |
+      Layer 2 reads `ba_review_packet.utilisation_strategy` set in Layer 1.
+      Possible values: 'host_proxy' | 'flat_reduction' | 'per_vm_telemetry'.
+      The R&D.SLIDE7.CPU.DEFAULT formula is run only when strategy ==
+      'host_proxy'. Otherwise R&D.SLIDE7.CPU.USER is run with the BA-approved
+      cpu_reduction_pct (from the L1 packet's proposed_reduction_factors).
+
+  - id: KP.WIN_8VCPU_MIN
+    title: "8-vCPU minimum applies ONLY to Windows Server VMs (option flag)"
+    statement: |
+      Microsoft licensing technically requires a minimum of 8 vCPUs for any
+      Azure VM running Windows Server. BAs do not always enforce this when
+      pursuing a strong positive ROI (per BA practice 2026-04-27 — the
+      original engine `min_vcpu = 8` floor in azure_sku_matcher applied to
+      ALL VMs was too aggressive). The Layer 2 pipeline exposes a flag:
+
+          enforce_8vcpu_min_for_windows_server: bool   (default: True)
+
+      Semantics:
+        - When True AND the VM's OS contains "Windows Server"
+          (case-insensitive, matched in either vInfo OS Config or vInfo OS
+          Tools column): apply min_vcpus = 8 in the rightsizing formulas.
+        - When True AND the VM's OS is anything else, missing, or empty:
+          treat as Linux, apply min_vcpus = 1 (no floor beyond the snapCPU
+          ladder's lowest rung).
+        - When False: apply min_vcpus = 1 to ALL VMs regardless of OS.
+      The decision is recorded per-VM as `vcpu_floor_source`:
+      'windows_compliance' | 'linux_or_unknown' | 'flag_off'.
+    enforcement: |
+      Layer 2 replica reads each VMRecord.os_config and os_tools, applies
+      the same Windows pattern as engine/rvtools_parser._WINDOWS_PATTERN
+      (re.compile(r"windows\\s+server", re.IGNORECASE)). BA can flip the
+      flag in the L1 review packet before Layer 2 runs.
+    citations:
+      - source: "User instruction to engineering"
+        date: "2026-04-27"
+        excerpt: "the '8-vcpu minimum' that technically ONLY applies to on-premise customer VMs that are running Windows Server. ... we need to incorporate an option flag that states 'Enforce 8-vcpu minimum for all Windows Server VMs'. if there is no OS or any non-Windows Server OS is listed for a VM, then that assumes Linux and we can go as low as need be"
+
+  - id: KP.UNITS_BINARY_FOR_SIZING
+    title: "Layer 2 sizing math uses BINARY (GiB); pricing math uses DECIMAL (GB)"
+    statement: |
+      Azure VM/disk catalogue tiers are published in binary GiB (memory)
+      and binary GiB (P-series disks). The R&D formulas convert MiB → GiB
+      via `/1024`. This DIFFERS from L1.KP.MIB_DEFAULT (`/953.674`) which
+      targets the Azure Retail Pricing API's decimal-GB convention.
+
+      Both are correct in their domain:
+        Layer 2 sizing  → /1024  (binary, matches catalogue tier shape)
+        Layer 1/3 TCO   → /953.674  (decimal, matches pricing API)
+    enforcement: |
+      Layer 2 replica reads VMRecord.memory_gb_decimal (L1 output, decimal)
+      ONLY for FYI display. For sizing it re-reads vInfo[Memory] MiB raw and
+      converts /1024. This avoids accumulated rounding drift across layers.
+
+  - id: KP.LEAST_COST_BIZ_CASE
+    title: "Business case = least-cost reasonable Azure SKUs (NOT solution architecture)"
+    statement: |
+      The BV Benchmark Business Case is a business-case + TCO model, not a
+      production solution architecture. The BA's SKU and disk choices
+      reflect a 'reasonable and functional' default for Azure cost
+      modelling — not workload-tuned, not performance-engineered.
+
+      The BA does NOT have a hardcoded family bias. The 76% D / 22% E /
+      2% F-FX / 0.15% HB distribution observed in Customer A's Xa2-fixed
+      tab is an OUTPUT of cheapest-fit selection across the full Azure
+      catalog, not a curated input pool.
+
+      The replica's matcher pool is the FULL live Azure VM catalog (all
+      D/E/F/FX/M/H families, all sizes) MINUS three small exclusion sets:
+
+        VM SKU exclusions (BA-confirmed via Customer A audit):
+          ❌ ARM-Cobalt (Standard_[DEF]Npls_v6, Standard_[DEF]Nps_v6,
+             Standard_[DEF]Npds_v7) — Linux-only; 0 BA picks.
+          ❌ Confidential Compute (Standard_DC*, Standard_EC*) —
+             specialised; 0 BA picks.
+          ❌ Spot / Low-Priority — not durable production capacity;
+             excluded by API fetcher.
+          ❌ Legacy versions v2/v3/v4 EXCEPT for families that only exist
+             in those versions: FX-only-v2 (Standard_FX*ms_v2), M-only-v3
+             (Standard_M96s_2_v3), HB-only-v4 (Standard_HB176rs_v4).
+             Customer A audit: 0 picks of legacy v2/v3/v4 from the
+             excluded families.
+
+        Storage tier default:
+          ✅ Standard SSD LRS (E-series tiers: E1…E80) — BA default
+             because business case targets least-cost storage that's
+             still production-class.
+          ⚠️ Premium SSD LRS (P-series) is OPT-IN for workloads where the
+             BA explicitly requires the higher IOPS/throughput tier.
+          ❌ GRS / RA-GRS / ZRS — over-provisioned for a base business
+             case. Available as opt-in.
+
+        Tie-break rule: when two SKUs share the cheapest PAYG, prefer the
+          one with the HIGHER version (v7 > v6 > v5). Matches BA's XA2
+          picks where AMD-lite v7 wins over v5/v6 at identical price.
+
+        Reservation defaults:
+          PAYG is the headline; RI-1y, RI-3y, SP-1y, SP-3y shown side-by-
+          side per L2.PRICING.001 so the BA can show the customer the
+          full discount tier ladder.
+    enforcement: |
+      The replica's matcher exposes a 3-algorithm ``--matcher-algorithm`` flag:
+        - ``ba_iterative_match``: apply the IN/OUT pool above,
+          then cheapest PAYG ≥ (vcpu, mem). When XA2 returns no match,
+          decrement vCPU 1-by-1 (down to floor), then increment memory 1
+          GiB at a time. Source values are NOT pre-snapped — the matcher's
+          ``>=`` test handles the ladder. Captures BA's manual adjustments
+          (transcript 00:05:49 / 00:08:09 / 00:11:29 / 00:12:07).
+        - ``ba_xa2_match`` (recommended): mirrors BA's XA2 spreadsheet
+          behavior — pre-snap source vCPU and memory to the Azure ladder
+          (R&D.SLIDE7.SNAPCPU, R&D.SLIDE8.SNAPMEM) FIRST, then run the same
+          decrement-vCPU / increment-mem bump loop. BA-confirmed 28 Apr
+          2026 that this is what XA2 actually does. Best parity vs
+          BA Xa2-fixed (98.2% exact-SKU match on Customer A).
+        - ``rd_rightsized``: deprecated alias for ``ba_xa2_match``. Kept
+          for backward compatibility; resolves to the same code path.
+        - ``pure_least_cost_no_arm``: diagnostic only; same exclusions,
+          no iterative adjustment loop, with vCPU/memory over-spec
+          ceilings (default 2.0× / 3.0×) to prevent absurd
+          over-provisioning. Useful as an absolute price floor.
+      Disk picker exposes ``--disk-class`` choice ('Standard'|'Premium').
+    citations:
+      - source: "User instruction (Customer A Q&A)"
+        date: "2026-04-27"
+        excerpt: "the BA is trying to develop a business case that has the best ROI. it is NOT a solution architecture! we're always looking for the reasonable and functional ... SKU across VMs and storage to get the best least-cost Azure options"
+      - source: "User clarification (Xa2-fixed audit)"
+        date: "2026-04-27"
+        excerpt: "the BA does not fixate on specific sku families, but rather lowest reasonably priced VM that matches. the challenge comes in when Xa2 function does not match and we have to adjust the cpu up or down ... or memory up or down"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:19:30"
+        excerpt: "the configuration default is LRS. We don't need GRS or any of that"
+
+  - id: KP.BA_ITERATIVE_MATCH
+    title: "BA matching mental model: XA2 + 1-by-1 integer adjustments"
+    statement: |
+      The BA's per-VM SKU picker is XA2 GETVM3 with a small interactive
+      adjustment loop when XA2 returns #VALUE! (no match). Verbatim from
+      Layer 2 transcript:
+
+        Step 1 (transcript 00:05:10): single XA2 lookup with raw
+          (vinfo[CPUs], vinfo[Memory_GB]). XA2 returns the cheapest Azure
+          SKU with vcpu ≥ target AND memory_gib ≥ target.
+
+        Step 2 (00:05:49, 00:08:09, 00:11:29): 'I adjusted them down,
+          basically one by one. one vCPU at a time until I got a
+          successful match.' DECREMENT vCPU input by 1 INTEGER per try
+          (NOT by ladder rung). XA2 still returns ladder-rung SKUs because
+          it tests vcpu ≥ target — e.g. asking for 13 vCPU on D-family
+          (rungs 8, 16) returns D16 because 16 ≥ 13.
+
+        Step 3 (00:12:07): 'I started incrementing on a one GB basis until
+          I got the first least cost Azure virtual machine match.' If
+          vCPU floor reached, INCREMENT memory by 1 GiB.
+
+        Step 4 (BA-implied): bias AGAINST memory increment (00:06:49: 'we
+          would end up over inflating'). Cap default 16 GiB; BA-tunable.
+
+      BA-overridable knobs (defaults match BA's typical workflow):
+        vcpu_decrement_floor     = 1        (don't go below 1 vCPU)
+        vcpu_decrement_max_steps = 4        (stay close to original)
+        mem_increment_cap_gib    = 16       (don't bloat memory)
+    enforcement: |
+      ``match_with_retry()`` in training/replicas/layer2_ba_replica.py
+      implements the 4-step loop verbatim, with knobs exposed in the L1
+      review packet for per-engagement override.
+    citations:
+      - source: "User clarification"
+        date: "2026-04-27"
+        excerpt: "yes, the ladder rung interpretation is an oversimplification of what appears to be a more regimented approach by R&D formulas. the reason for the '1 by 1' is to ensure that once we hit a match with Xa2 function, then we stop. also, one way that Xa2 functions is that an adjusted cpu count =3 can still match to a D4 or some other 4-core vm sku"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:05:49"
+        excerpt: "I adjusted them down, basically one by one. one vCPU at a time until I got a successful match"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:12:07"
+        excerpt: "I started incrementing on a one GB basis until I got the first least cost Azure virtual machine match"
+
+  - id: KP.LIVE_PRICING_API
+    title: "Pricing is LIVE Azure Retail Prices API — not a snapshot"
+    statement: |
+      The BA's XA2 add-in (Excel) and the replica's pricing module BOTH
+      call the live Azure Retail Prices API at
+      https://prices.azure.com/api/retail/prices in real time. There is
+      NO baked-in price list, NO snapshot, NO historical data file.
+
+      Verified 2026-04-27 by spot-checking 8 of BA's most-frequent
+      Customer A SKU picks against today's API: 8/8 matched at 0.00%
+      delta on PAYG hourly. Remaining replica-vs-BA variance comes from
+      SKU SHAPE selection, not price drift.
+    enforcement: |
+      training/replicas/azure_pricing.py uses urllib only (no SDK), 24h
+      cache lives at .cache/azure_prices_l2/ (gitignored). Cache files
+      are NEVER written empty (poison-cache guard).
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:07:33"
+        excerpt: "the XA2 functions look up through the same Azure Retail Price API that you will use"
+      - source: "Replica spot-check verification"
+        date: "2026-04-27"
+        evidence: "8/8 SKUs matched 0.00% delta vs live API: D2als_v7, D4as_v5, D4als_v7, E4as_v5, D8as_v5, D2as_v5, D8als_v7, D16als_v7"
+
+  - id: KP.PRICING_OFFER_MATRIX
+    title: "Five pricing offers per VM: PAYG, RI-1y, RI-3y, SP-1y, SP-3y"
+    statement: |
+      For every successfully matched SKU the pipeline must report PAYG plus
+      Reserved Instance (1-year, 3-year) and Savings Plan (1-year, 3-year)
+      prices when each is available from the Azure Retail Price API. Some
+      SKUs do not offer all five; missing offers are flagged not faked.
+    enforcement: |
+      per_vm_l2[].pricing is dict[offer_code -> {usd_yr, source, available}].
+      Aggregate Azure consumption revenue is the sum across per-VM PAYG
+      values for the headline number, with the four reserved/savings totals
+      shown alongside.
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:04:07"
+        excerpt: "The reserved instance, 3 year. The savings plan, one year, the savings plan, three year, if available. Sometimes for different VM SKUs on Azure, not all of the pricing offers are available uniformly. So you just have to annotate, provide warnings or errors when some are missing"
+
+  - id: KP.BA_SMALL_VM_FLOOR
+    title: "BA judgment overlay: pad undersized source VMs before sizing"
+    statement: |
+      Independent of the R&D slides, the BA's Customer A 2024-10 Xa2-fixed
+      authoritative output applies a minimum (vCPU, memory_GiB) floor to
+      undersized source VMs before SKU matching. Empirically observed:
+      ~325 VMs with source (1 vCPU, <1 GiB) were padded to (2 vCPU, 2 GiB)
+      and matched to Standard_D2als_v7 instead of Standard_F1als_v7.
+      This is BA judgment (not in any R&D slide), exposed as an OPT-IN flag.
+    enforcement: |
+      Layer 2 replica accepts two optional kwargs:
+        ba_min_vcpu_floor: int | None      (None == OFF)
+        ba_min_memory_gib_floor: int | None (None == OFF)
+      When set, the rightsizing math operates on
+      effective_source = (max(raw_vcpu, floor_vcpu),
+                          max(raw_mem_mib, floor_mem_gib*1024)).
+      Per-VM record annotates ba_floor_applied=True when triggered, and the
+      cpu_branch/memory_branch tags receive a "+ba_small_vm_floor" suffix.
+      Default is OFF. Customer A baseline expects 2/2.
+    citations:
+      - source: "Customer A 2024-10 Xa2-fixed audit"
+        date: "2026-04-28"
+        excerpt: "BA padded all (1 vCPU, <1 GiB) VMs to (2 vCPU, 2 GiB) → D2als_v7"
+      - source: "User instruction"
+        date: "2026-04-28"
+        excerpt: "all these options we'd ultimately want to render and annotate the cited logic for each option to BA before the BA approves layer 2 and goes to layer 3"
+
+  - id: KP.BA_APPROVAL_GATE
+    title: "Render + cite every Layer 2 decision for BA approval"
+    statement: |
+      Before the app transitions Layer 2 → Layer 3, the BA reviews a
+      structured payload with every right-sizing decision, its R&D-slide
+      anchor (or BA-judgment overlay), and the resulting per-VM SKU + ACR
+      across all 5 pricing offers. The BA approves explicitly; the app
+      records the approver name and timestamp.
+    enforcement: |
+      training/replicas/layer2_ba_approval.py exposes:
+        BRANCH_CITATIONS    — branch_tag → R&D anchor + slide + formula
+        BA_FLOOR_CITATION   — KP.BA_SMALL_VM_FLOOR overlay citation
+        cite_branch(tag)    — decompose '+'-suffixed tags into a citation list
+        build_per_vm_annotation(VMRecordL2) -> dict
+        build_ba_approval_payload(Layer2Result, run_meta=…) -> dict
+      app/pages/ba_approval.py renders the payload as a Streamlit page (Step 2.5).
+    citations:
+      - source: "User instruction"
+        date: "2026-04-28"
+        excerpt: "render and annotate the cited logic for each option to BA before the BA approves layer 2 and goes to layer 3 in the app"
+
+  - id: KP.LINUX_AHUB_ASSUMPTION
+    title: "Always price Azure VMs at the Linux rate (Azure Hybrid Benefit)"
+    statement: |
+      ALL Azure VM compute pricing in Layer 2 (PAYG, RI 1y, RI 3y, SP 1y,
+      SP 3y) is fetched at the Linux rate, NEVER at the Windows-bundled
+      rate. Rationale: customers are assumed to bring their existing
+      Windows Server licenses via Azure Hybrid Use Benefit (AHUB), so
+      Windows licensing cost MUST NOT be included in the business case
+      ACR. This applies regardless of source-VM OS.
+    enforcement: |
+      training/replicas/azure_pricing.py L508-510 filters out any
+      Azure Retail Prices API row whose ``productName`` contains
+      'Windows'. The remaining rows are either explicitly Linux
+      ('Series Linux') or OS-agnostic compute pricing (no OS suffix,
+      i.e., the AHUB Linux rate). Rows with skuName containing 'Spot'
+      or 'Low Priority' are also filtered.
+
+      VERIFICATION (2026-04-28 against BA Customer A Xa2-fixed):
+        - Standard_D2als_v7   BA $0.0804/hr  =  catalog $0.0804/hr ✓
+        - Standard_D4als_v7   BA $0.161/hr   =  catalog $0.161/hr  ✓
+        - Standard_D4as_v5    BA $0.172/hr   =  catalog $0.172/hr  ✓
+        - Standard_M96s_2_v3  BA $12.45/hr   =  catalog $12.45/hr  ✓ (vm1016)
+    citations:
+      - source: "User instruction"
+        date: "2026-04-28"
+        excerpt: "BA ALWAYS picks Linux because we automatically assume the customer will use AHUB. We NEVER include Windows licensing cost in the Azure pricing! RULE!!"
+
+# =============================================================================
+# Section A — INPUT SCOPE
+# =============================================================================
+
+rules:
+
+  - rule_id: L2.SCOPE.001
+    topic: "Layer 2 operates on POWERED-ON VMs only"
+    ba_action: |
+      Only powered-on VMs from Layer 1's per_vm[] are considered for Azure
+      VM least-cost matching. Powered-off VMs and templates are ignored at
+      Layer 2 (they remain in Layer 1's TCO baseline).
+    inputs:
+      - layer1: "per_vm[] where is_powered_on == True AND is_template == False"
+    output:
+      engine_field: "per_vm_l2[] indexed by VM name"
+      excel_cell: "(used in Consumption Plan Wk1 tab)"
+    fallbacks: []
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:01:37"
+        excerpt: "We only want to do the powered on VMs for the Azure VM least cost matching that will then sum up to the Azure consumption revenue."
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:13:11"
+        excerpt: "again, it is only for powered on VMs. You see that here, powered on VMs for calculating the Azure consumption revenue."
+    reference_expected: 2661
+    engine_status: MATCH
+    engine_status_note: "Engine's vm_records[] already contains only powered-on, non-template VMs."
+    reviewed: true
+
+  - rule_id: L2.SCOPE.002
+    topic: "Memory must be in decimal GB before Azure Retail Price API lookup"
+    ba_action: |
+      Convert vInfo[Memory] from MiB to GB BEFORE any Azure pricing call.
+      For Layer 2 sizing math use binary GiB (/1024) per KP.UNITS_BINARY_FOR_SIZING;
+      for pricing-API line items use decimal GB (/953.674) per L1.KP.MIB_DEFAULT.
+      Both conversions live inside Layer 2; do not lean on L1's decimal
+      memory FYI for sizing.
+    inputs:
+      - "vInfo[Memory]"
+    output:
+      engine_field: "rs_mem_gib (binary), price_query_mem_gb (decimal)"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:03:00"
+        excerpt: "I've had to convert from MIB for memory to gigabytes decibel. And that conversion needs to be done before you do the Azure Retail Price API lookup."
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: "Engine converts but uses inconsistent /1024 across the board; needs explicit dual-conversion."
+    reviewed: true
+
+# =============================================================================
+# Section B — RIGHTSIZING (R&D-sanctioned, dual-cited)
+# =============================================================================
+
+  - rule_id: L2.RIGHTSIZE.CPU.001
+    topic: "CPU rightsizing per R&D.SLIDE7 with strategy-driven branch selection"
+    ba_action: |
+      Apply the R&D-sanctioned CPU rightsizing formula PER VM. Branch
+      selection is driven by KP.STRATEGY_PRECEDENCE:
+
+        strategy == 'per_vm_telemetry':
+          For each VM with non-null cpu_util_pct (from vCPU tab or vInfo
+          embedded), substitute that into R&D.SLIDE7.CPU.USER as the
+          (1 - cpu_reduction_pct/100) factor (i.e. retained% = util%).
+
+        strategy == 'host_proxy':   (opt-in only per KP.HOSTPROXY_GATE)
+          rs_vcpus = snapCPU( max( min_vcpus,
+                                    ceil( vInfo[CPUs]
+                                           × max(vHost[CPU Usage %], 1)/100 ) ) )
+          (R&D.SLIDE7.CPU.DEFAULT verbatim)
+
+        strategy == 'flat_reduction':
+          rs_vcpus = snapCPU( max( min_vcpus,
+                                    ceil( vInfo[CPUs]
+                                           × (1 − cpu_reduction_pct/100) ) ) )
+          (R&D.SLIDE7.CPU.USER with BA-supplied cpu_reduction_pct)
+
+        strategy == 'like_for_like':
+          rs_vcpus = snapCPU( max( min_vcpus, vInfo[CPUs] ) )
+          (Equivalent to R&D.SLIDE7.CPU.USER with cpu_reduction_pct = 0.
+           Snap-only; no reduction applied. Customer A reference baseline used
+           this strategy.)
+
+        strategy == 'ba_fallback':
+          rs_vcpus = snapCPU( max( min_vcpus,
+                                    ceil( vInfo[CPUs] × 0.40 ) ) )
+          (R&D.SLIDE7.CPU.USER with cpu_reduction_pct = 60 per
+           KP.BA_FALLBACK_REDUCTIONS. BA-editable.)
+
+      `min_vcpus` resolved per-VM via KP.WIN_8VCPU_MIN.
+      `snapCPU` ladder per R&D.SLIDE7.SNAPCPU.
+    inputs:
+      - "VMRecord.vcpu (vInfo[CPUs])"
+      - "VMRecord.host_proxy_cpu_pct (vHost[CPU Usage %], when host_proxy strategy)"
+      - "VMRecord.cpu_util_pct (vCPU/vInfo telemetry, when per_vm_telemetry strategy)"
+      - "ba_review_packet.utilisation_strategy"
+      - "ba_review_packet.cpu_reduction_pct (when flat_reduction strategy)"
+    output:
+      engine_field: "per_vm_l2[].rs_vcpus, per_vm_l2[].cpu_branch"
+      excel_cell: "n/a (Consumption Plan Wk1)"
+    fallbacks:
+      - condition: "BA selects host_proxy but vHost CPU Usage % is missing for a VM's host"
+        action: "Fall back to ba_fallback strategy for that VM only; flag in per-VM diagnostics with `cpu_branch_fallback=True`."
+      - condition: "BA selects per_vm_telemetry but cpu_util_pct is null for a specific VM"
+        action: "Fall back to like_for_like for that VM (do not silently substitute ba_fallback); flag."
+    citations:
+      - source: "Microsoft R&D — VMware/OnPrem to Azure Mappings"
+        anchor: "R&D.SLIDE7.CPU.DEFAULT and R&D.SLIDE7.CPU.USER"
+        file: "training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:16:10"
+        excerpt: "my rule of thumb is 60%, 60% of the CPU and the memory utilization, so that may yield a different Azure VM SKU"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:16:32"
+        excerpt: "I'm going to take that back. 60% utilization for CPU and 40 or 50%, sometimes 40% utilization on CPU. Memory. I might have those two backwards"
+      - source: "User instruction (Customer A Q&A)"
+        date: "2026-04-27"
+        excerpt: "the training data is basically like-for-like Azure VM mapping apart from the several edge cases"
+    reference_expected: 16318
+    customer_strategy: "like_for_like"
+    engine_status: UNIMPLEMENTED
+    engine_status_note: |
+      REPLICA: Implemented in training/replicas/layer2_ba_replica.py.
+        - rd_slide7_cpu_default + rd_slide7_cpu_user functions
+        - 5-strategy enum dispatch (per_vm_telemetry / host_proxy /
+          flat_reduction / like_for_like / ba_fallback)
+        - snapCPU ladder per R&D.SLIDE7.SNAPCPU
+      Customer A like_for_like: replica reproduces 15,964 vCPU vs BA
+      16,318 (-2.17%, within 3% tol).
+
+      ENGINE: Still uses vm_rightsizer.resolve_vm_utilisation which always
+      returns ('fallback', 0, 0) since v1.3.0 M1. Convergence work next.
+    reviewed: true
+
+  - rule_id: L2.RIGHTSIZE.CPU.WINDOWS_FLOOR
+    topic: "8-vCPU minimum applies ONLY to Windows Server VMs (BA carve-out, default OFF)"
+    ba_action: |
+      Per KP.WIN_8VCPU_MIN. Default is FALSE; BA opts in per engagement.
+      Windows detection uses the same regex as the Layer 1 engine:
+      re.compile(r"windows\s+server", re.IGNORECASE) on EITHER vInfo `OS
+      according to the configuration file` OR vInfo `OS according to the
+      VMware Tools`.
+
+      Decision matrix:
+
+        flag=False (DEFAULT), any OS              →  min_vcpus = 1
+        flag=True,  OS matches Windows Server     →  min_vcpus = 8
+        flag=True,  OS empty / non-Windows        →  min_vcpus = 1   (Linux)
+
+      The BA workflow typically presents the customer BOTH views (with and
+      without strict enforcement) before committing to the final business
+      case posture.
+    inputs:
+      - "VMRecord.os_config, VMRecord.os_tools"
+      - "ba_review_packet.enforce_8vcpu_min_for_windows_server (default False)"
+    output:
+      engine_field: "per_vm_l2[].min_vcpus, per_vm_l2[].vcpu_floor_source"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - source: "User instruction to engineering"
+        date: "2026-04-27"
+        excerpt: "the '8-vcpu minimum' that technically ONLY applies to on-premise customer VMs that are running Windows Server ... 'Enforce 8-vcpu minimum for all Windows Server VMs'. if there is no OS or any non-Windows Server OS is listed for a VM, then that assumes Linux"
+      - source: "User instruction (Customer A Q&A)"
+        date: "2026-04-27"
+        excerpt: "for Customer A case, I did NOT follow '8 vcpu minimum' for Windows Server source VMs. So OFF. we'll want this as a approval option for the BA to see with and without strict enforcement."
+      - source: "engine/rvtools_parser.py"
+        anchor: "_WINDOWS_PATTERN"
+        excerpt: 're.compile(r"windows\s+server", re.IGNORECASE)'
+    source_conflict:
+      with: "R&D deck"
+      summary: "R&D formulas use a generic min_vcpus parameter; do not specify the OS-conditional carve-out."
+      resolution: "BA carve-out is additive — it sets the value of min_vcpus PER VM before the R&D formula runs. The R&D formula itself is unchanged."
+    reference_expected: null
+    customer_strategy: "flag = False (Customer A engagement explicitly did not enforce)"
+    engine_status: PARTIAL
+    engine_status_note: |
+      engine/azure_sku_matcher.py applies min_vcpu=8 to ALL VMs unconditionally.
+      Convergence work: gate by Windows detection AND by the (default-False)
+      flag.
+    reviewed: true
+
+  - rule_id: L2.RIGHTSIZE.MEMORY.001
+    topic: "Memory rightsizing per R&D.SLIDE8 with strategy-driven branch selection"
+    ba_action: |
+      Apply the R&D-sanctioned memory rightsizing PER VM, driven by
+      KP.STRATEGY_PRECEDENCE:
+
+        strategy == 'per_vm_telemetry'  AND  vMemory[Consumed] present:
+          rs_mem_gib = snapMem( max( min_mem_gib,
+                                       (vMemory[Consumed] / 1024)
+                                         × (1 + mem_buffer_pct/100) ) )
+          (R&D.SLIDE8.MEMORY.DEFAULT — buffer defaults to 0)
+
+        strategy == 'flat_reduction':
+          rs_mem_gib = snapMem( max( min_mem_gib,
+                                       (vInfo[Memory] / 1024)
+                                         × (1 − mem_reduction_pct/100)
+                                         × (1 + mem_buffer_pct/100) ) )
+          (R&D.SLIDE8.MEMORY.USER with BA-supplied parameters)
+
+        strategy == 'like_for_like':
+          rs_mem_gib = snapMem( max( min_mem_gib, vInfo[Memory] / 1024 ) )
+          (R&D.SLIDE8.MEMORY.USER with mem_reduction_pct=0, buffer=0.
+           Customer A reference baseline used this strategy.)
+
+        strategy == 'ba_fallback':
+          rs_mem_gib = snapMem( max( min_mem_gib,
+                                       (vInfo[Memory] / 1024) × 0.60 ) )
+          (R&D.SLIDE8.MEMORY.USER with mem_reduction_pct = 40 per
+           KP.BA_FALLBACK_REDUCTIONS, buffer = 0. BA-editable.)
+
+        strategy == 'host_proxy':
+          (Memory does NOT use host proxy in the R&D deck. When
+           utilisation_strategy='host_proxy' is selected for CPU, memory
+           defaults to like_for_like unless BA specifies otherwise.)
+
+      `min_mem_gib` proposed at 1 GiB (snapMem floor governs at 4 GiB).
+      `snapMem` ladder per R&D.SLIDE8.SNAPMEM.
+    inputs:
+      - "vInfo[Memory] (raw MiB) for sizing"
+      - "VMRecord.mem_util_pct (when vMemory tab present)"
+      - "ba_review_packet.utilisation_strategy, mem_reduction_pct, mem_buffer_pct"
+    output:
+      engine_field: "per_vm_l2[].rs_mem_gib, per_vm_l2[].memory_branch"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "strategy=per_vm_telemetry but vMemory missing for a VM"
+        action: "Fall back to like_for_like for that VM; flag in diagnostics."
+    citations:
+      - source: "Microsoft R&D — VMware/OnPrem to Azure Mappings"
+        anchor: "R&D.SLIDE8.MEMORY.DEFAULT and R&D.SLIDE8.MEMORY.USER"
+        file: "training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:16:32"
+        excerpt: "60% utilization for CPU and 40 or 50%, sometimes 40% utilization on CPU. Memory. I might have those two backwards"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:06:49"
+        excerpt: "I ended up going up on memory and left that, we would end up over inflating the Azure consumption revenue with very expensive VMs. So this is a bit of a balancing."
+      - source: "User instruction (Customer A Q&A)"
+        date: "2026-04-27"
+        excerpt: "like-for-like Azure VM mapping apart from the several edge cases"
+    source_conflict:
+      with: "R&D deck"
+      summary: "R&D's 'default' branch references vMemory[Consumed]; the deck does not specify what to do when vMemory tab is absent."
+      resolution: "Engineering extension: when vMemory missing for a VM under per_vm_telemetry strategy, fall through to like_for_like for that VM (NOT to ba_fallback — the BA must consciously opt into a reduction). Documented in fallbacks[]."
+    reference_expected: 76068
+    customer_strategy: "like_for_like"
+    engine_status: UNIMPLEMENTED
+    engine_status_note: "Engine has no snapMem ladder and no vMemory-Consumed branch."
+    reviewed: true
+
+  - rule_id: L2.RIGHTSIZE.STORAGE.001
+    topic: "Storage rightsizing per R&D.SLIDE9 — three-tier source chain + strategy"
+    ba_action: |
+      Apply the R&D three-tier source chain PER VM. Strategy adjusts which
+      reduction/buffer values feed the formulas:
+
+        Source-tier selection (ALWAYS, regardless of strategy):
+          Tier 1 — vPartition present, Σ Consumed MiB > 0
+          Tier 2 — vPartition present, Σ Consumed = 0/null
+          Tier 3 — vPartition absent (use vInfo[Total disk capacity MiB])
+
+        strategy == 'per_vm_telemetry' OR 'like_for_like':
+          Tier 1: R&D.SLIDE9.STORAGE.DEFAULT (Consumed-based, buffer=0)
+          Tier 2/3: R&D.SLIDE9.STORAGE.CAPACITY/.VINFO with reduction=0,
+                    buffer=0 (effectively size to provisioned capacity)
+
+        strategy == 'flat_reduction':
+          All tiers: R&D.SLIDE9.* with BA-supplied storage_reduction_pct
+          and storage_buffer_pct.
+
+        strategy == 'ba_fallback':
+          Tier 2/3: R&D.SLIDE9.STORAGE.CAPACITY/.VINFO with
+                    storage_reduction_pct = 20 per KP.BA_FALLBACK_REDUCTIONS
+                    (retained = 80%), buffer = 0. BA-editable.
+          Tier 1: same as per_vm_telemetry (consumed already reflects reality).
+
+      All branches snap UP to nearest 128 GiB (P10 minimum) and floor at
+      128 GiB. Each branch recorded per-VM as `storage_branch` (one of:
+      'default', 'capacity', 'vinfo'). `storage_strategy` records which
+      strategy parameters were applied.
+    inputs:
+      - "VMRecord.in_use_gb_decimal, .provisioned_gb_decimal, .provisioned_storage_source"
+      - "vPartition: Σ Consumed MiB and Σ Capacity MiB per VM"
+      - "vInfo: Total disk capacity MiB"
+      - "ba_review_packet.utilisation_strategy, storage_reduction_pct, storage_buffer_pct"
+    output:
+      engine_field: "per_vm_l2[].rs_disk_gib, per_vm_l2[].storage_branch, .storage_strategy"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - source: "Microsoft R&D — VMware/OnPrem to Azure Mappings"
+        anchor: "R&D.SLIDE9.STORAGE.DEFAULT, .CAPACITY, .VINFO"
+        file: "training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:17:31"
+        excerpt: "in MIB format, we need to convert to GB decimal format. So this utilized storage is what is going into the matching of a managed disk."
+      - source: "User instruction (Customer A Q&A)"
+        date: "2026-04-27"
+        excerpt: "like-for-like Azure VM mapping"
+    reference_expected: 4572825
+    customer_strategy: "like_for_like (Tier 2 — vPartition Capacity, no reduction/buffer)"
+    engine_status: UNIMPLEMENTED
+    engine_status_note: |
+      Engine has its own storage-source priority but no 128-GiB snap and no
+      reduction/buffer parameters. Convergence work: replace
+      consumption_builder._vm_storage_cost selection with the R&D chain.
+    reviewed: true
+
+  - rule_id: L2.RIGHTSIZE.STORAGE.MULTI_DISK
+    topic: "Large-storage VMs: decompose into multiple managed disks"
+    ba_action: |
+      When a VM's rs_disk_gib exceeds the largest single-disk tier
+      available in Azure (today's max managed disk: P80 = 32 TiB / 32,767
+      GiB), the BA decomposes the storage across MULTIPLE disks of the
+      largest practical tier. Use vInfo[Disks] (or analogous "number of
+      disks" column) as the decomposition hint when available.
+
+      Example from BA transcript (Customer A): a VM with ~203,000 GiB of in-use
+      storage and 42 disks → mapped to 25× E60 managed disks (LRS).
+
+      Default redundancy: LRS (no GRS or higher) — this is a business case;
+      use the optimal cost tier, not the over-provisioned solution.
+    inputs:
+      - "rs_disk_gib (output of L2.RIGHTSIZE.STORAGE.001)"
+      - "vInfo[Disks] (number of disks per VM)"
+    output:
+      engine_field: "per_vm_l2[].disk_layout = list[(tier, count, gib_each)]"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "vInfo[Disks] missing"
+        action: "Pick the smallest count of largest-tier disks that meets rs_disk_gib; flag in per-VM diagnostics."
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:18:42"
+        excerpt: "there is not a single managed disk on the Azure Pricing Retail API that can fulfill that one single storage size, but we also notice that we have other metadata here ... it's called disks ... 42 disks ... 25 E60 managed disks are matching to be able to fulfill"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:19:30"
+        excerpt: "the configuration default is LRS. We don't need GRS or any of that"
+    source_conflict:
+      with: "R&D deck"
+      summary: "R&D formula returns a single rs_disk_gib; does not address multi-disk decomposition."
+      resolution: "Engineering extension: post-process rs_disk_gib through a tier-decomposition step; recorded as L2.RIGHTSIZE.STORAGE.MULTI_DISK."
+    reference_expected: null
+    engine_status: UNIMPLEMENTED
+    engine_status_note: ""
+    reviewed: true
+
+# =============================================================================
+# Section C — SKU MATCHING (least-cost selection)
+# =============================================================================
+
+  - rule_id: L2.MATCH.001
+    topic: "SKU candidate set is the least-cost match across the Azure Retail Price API"
+    ba_action: |
+      For each VM, query the Azure Retail Price API for SKUs that satisfy:
+        sku.vcpu      >= rs_vcpus
+        sku.memory_gib >= rs_mem_gib
+        sku.region     == VM.azure_region
+      Apply optional family / processor pin (R&D.OPTIONAL.FAMILY_PROCESSOR
+      slide 5) when supplied. Pick the SKU with the lowest PAYG hourly
+      price. The XA2 Excel add-in does this automatically; the engine and
+      replica reproduce the logic.
+    inputs:
+      - "rs_vcpus, rs_mem_gib (from L2.RIGHTSIZE.*)"
+      - "VMRecord.azure_region"
+      - "ba_review_packet.family_pin, processor_pin"
+    output:
+      engine_field: "per_vm_l2[].sku_name, .sku_vcpu, .sku_memory_gib, .sku_payg_usd_hr"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "No SKU satisfies the constraints"
+        action: "BA workflow per L2.RIGHTSIZE.CPU.RETRY — increment vCPU by 1 until a match is found, capping at the snapCPU ladder."
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:02:34"
+        excerpt: "we use an Excel add-in, Microsoft Excel add-in called XA2. ... you won't have access to that, so you'll have to build in the logic yourself or review the existing logic and potentially refactor it."
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:03:48"
+        excerpt: "For whatever number of Azure VM SKUs come back, pick the least cost"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: "engine/azure_sku_matcher.py implements least-cost matching but ignores family/processor pin and uses hard min_vcpu=8 (per L2.RIGHTSIZE.CPU.WINDOWS_FLOOR carve-out)."
+    reviewed: true
+
+  - rule_id: L2.RIGHTSIZE.CPU.RETRY
+    topic: "Match-error retry: BA decrements then increments vCPU to find the first viable SKU"
+    ba_action: |
+      When the initial rs_vcpus value yields no SKU match (XA2 returns
+      #VALUE!), the BA's manual technique is:
+        a) DECREMENT by 1 vCPU at a time until a match is found, capping at
+           min_vcpus (KP.WIN_8VCPU_MIN). Annotated GREEN in BA spreadsheets.
+        b) If decrement reaches min_vcpus with no match, INCREMENT by 1
+           memory GiB at a time (rare; cheaper Azure SKUs don't always
+           offer the exact memory tier). Annotated YELLOW.
+      Goal: the cheapest SKU close to but ≥ source vCPU/memory, never
+      over-inflating the price for the sake of getting a match.
+    inputs:
+      - "rs_vcpus (initial), rs_mem_gib"
+    output:
+      engine_field: "per_vm_l2[].adjustment = {vcpu_delta, mem_delta_gib, retry_iterations}"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "Hit min_vcpus AND ladder maxes out on memory increments"
+        action: "Last-resort: pick the absolute cheapest SKU in the region; record retry_failed=True and surface per-VM."
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:06:10"
+        excerpt: "I adjusted them down, basically one by one, one vCPU at a time until I got a successful match for a least cost Azure virtual machine"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:13:00"
+        excerpt: "I'm going to start incrementing up. By one, and I did, and then you see a successful Match there through the Azure Retail Price API."
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:08:46"
+        excerpt: "We try to do that as close to what the customer's original counts are, but we're also trying to optimize price ... we cannot over-inflate the monthly or annual Azure consumption pricing for a VM just to get a match"
+    source_conflict: null
+    reference_expected: null
+    engine_status: UNIMPLEMENTED
+    engine_status_note: "Engine picks first SKU that satisfies constraints but does not iterate when no match exists."
+    reviewed: true
+
+# =============================================================================
+# Section D — PRICING OFFERS
+# =============================================================================
+
+  - rule_id: L2.PRICING.001
+    topic: "Five pricing offers per VM: PAYG, RI-1y, RI-3y, SP-1y, SP-3y"
+    ba_action: |
+      For each matched SKU, query and report all five pricing offers from
+      the Azure Retail Price API:
+        - PAYG (pay-as-you-go) — required, headline number
+        - Reserved Instance 1-year
+        - Reserved Instance 3-year
+        - Savings Plan 1-year
+        - Savings Plan 3-year
+      Some SKUs do not offer all five. Missing offers are FLAGGED, never
+      faked. The headline Azure consumption revenue is sum of per-VM PAYG
+      USD/year; the 4 reserved/savings totals are shown alongside.
+    inputs:
+      - "per_vm_l2[].sku_name, .azure_region"
+    output:
+      engine_field: "per_vm_l2[].pricing[offer] = {usd_hr, usd_yr, available, source}"
+      excel_cell: "Consumption Plan Wk1"
+    fallbacks:
+      - condition: "An offer is unavailable for a SKU"
+        action: "Mark available=False and exclude from that offer's fleet sum; surface count of missing offers per offer code."
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:04:07"
+        excerpt: "The reserved instance, 3 year. The savings plan, one year, the savings plan, three year, if available. Sometimes for different VM SKUs on Azure, not all of the pricing offers are available uniformly. So you just have to annotate, provide warnings or errors when some are missing"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:13:52"
+        excerpt: "There's a few VMs, the standard F1, that does not have three-year reserved instance. So that could be problematic. Is it possible to find a standard D-series ... that is not overly inflated"
+    reference_expected: 6704247   # PAYG USD/yr per Customer A feedback
+    engine_status: UNIMPLEMENTED
+    engine_status_note: |
+      REPLICA: Full 5-offer matrix per VM via training/replicas/azure_pricing.py.
+        - PAYG hourly + RI-1y/3y (upfront-total ÷ hours) + SP-1y/3y (hourly)
+        - Aggregated to fleet $$/yr per offer
+        - BOTH tier-based (per-SKU PAYG) AND reference-rate ($0.048/vCPU/hr
+          flat) totals surfaced — BA chooses methodology per engagement
+        - Customer A reference-rate PAYG: $6,712,543 vs BA $6,704,247 (+0.12%)
+      ENGINE: Reports PAYG only; no RI/SP/SP variants.
+    reviewed: true
+
+  - rule_id: L2.PRICING.002
+    topic: "When an offer is missing, prefer a similar D-series SKU that has it"
+    ba_action: |
+      The BA's heuristic for missing-offer cases (e.g. Standard_F1 lacks
+      RI-3y): consider an analogous Standard_D-series SKU that DOES offer
+      the missing pricing tier, ONLY if the substitution does not "overly
+      inflate" the PAYG price. Surface as a BA-decision option, not silent
+      substitution.
+    inputs:
+      - "per_vm_l2[].sku_name and pricing[offer].available list"
+    output:
+      engine_field: "per_vm_l2[].sku_alternates[] = [{sku, offers_available, payg_delta_pct}]"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:13:52"
+        excerpt: "Is it possible to find a standard D-series, D as in David, series that is not overly inflated related to the price of this initial least cost matching Azure virtual machine, that's probably something good to attempt because generally those would have three-year reserved instance and potentially also one and three year reserved instance offers, as well as potentially one and three year savings plan offers"
+    source_conflict:
+      with: "R&D deck"
+      summary: "R&D deck does not specify SKU substitution heuristics for missing pricing offers."
+      resolution: "BA-only rule. Engineering extension: emit alternates list; BA decides at review."
+    reference_expected: null
+    engine_status: UNIMPLEMENTED
+    engine_status_note: ""
+    reviewed: true
+
+# =============================================================================
+# Section E — STORAGE PRICING (managed disk)
+# =============================================================================
+
+  - rule_id: L2.STORAGE_PRICE.001
+    topic: "Managed disk pricing default: LRS, lowest-tier-that-fits, summed across decomposed disks"
+    ba_action: |
+      For each VM's disk_layout (output of L2.RIGHTSIZE.STORAGE.MULTI_DISK):
+        - For each (tier, count, gib_each) entry, query Azure Retail Price
+          API for the LRS (locally redundant storage) monthly price of that
+          tier in the VM's region.
+        - Annual cost per VM = sum( count × monthly_price × 12 ) across
+          all disk entries.
+      Default redundancy: LRS. Do not select GRS / ZRS / RAGRS for the
+      business case (over-provisioned).
+    inputs:
+      - "per_vm_l2[].disk_layout"
+      - "per_vm_l2[].azure_region"
+    output:
+      engine_field: "per_vm_l2[].storage_pricing = {tier, count, gib_each, payg_usd_yr}, .total_storage_usd_yr"
+      excel_cell: "Consumption Plan Wk1"
+    fallbacks: []
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:19:30"
+        excerpt: "the configuration default is LRS. We don't need GRS or any of that, because again, this is a business case and we're trying to get an optimal cost"
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:20:39"
+        excerpt: "once all of the errors and the matchings have occurred ... we sum up the consumption to annual to show here is pay as you go annual, here is one year reserved instance annual ..."
+    reference_expected: 4115545
+    engine_status: PARTIAL
+    engine_status_note: "Engine prices storage but does not surface per-tier decomposition; redundancy assumption is implicit."
+    reviewed: true
+
+# =============================================================================
+# Section F — REGION & FAMILY/PROCESSOR (R&D optional parameters)
+# =============================================================================
+
+  - rule_id: L2.REGION.001
+    topic: "Region resolution: Map vs Force per R&D.OPTIONAL.REGION (slide 3)"
+    ba_action: |
+      Per-VM region comes from Layer 1 (VMRecord.azure_region), which is
+      derived from vInfo Site/Datacenter signals. R&D's optional prompts
+      let the BA override:
+        - 'Map region to <code>'   → use <code> ONLY when L1 region is
+          empty/fallback for that VM.
+        - 'Force region to <code>' → override L1 region for ALL VMs.
+    inputs:
+      - "VMRecord.azure_region, VMRecord.azure_region_source"
+      - "ba_review_packet.region_override_mode in {none, map, force}"
+      - "ba_review_packet.region_override_code (one of R&D.OPTIONAL.REGION_CODES)"
+    output:
+      engine_field: "per_vm_l2[].azure_region (final after override)"
+      excel_cell: "n/a"
+    fallbacks: []
+    citations:
+      - source: "Microsoft R&D — VMware/OnPrem to Azure Mappings"
+        anchor: "R&D.OPTIONAL.REGION (slide 3) and R&D.OPTIONAL.REGION_CODES (slide 4)"
+        file: "training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: "Engine has region inference but no Map/Force override prompts."
+    reviewed: true
+
+  - rule_id: L2.FAMILY_PIN.001
+    topic: "Optional family / processor pin per R&D.OPTIONAL.FAMILY_PROCESSOR (slide 5)"
+    ba_action: |
+      When the BA pins an Azure VM family ({GeneralPurpose, ComputeOptimized,
+      MemoryOptimized, HighPerformanceCompute, StorageOptimized, GPU,
+      FPGAInstances}) and/or processor ({Intel, AMD, ARM}), the SKU candidate
+      set in L2.MATCH.001 is filtered by these constraints BEFORE least-cost
+      selection. If no SKU in the pinned family satisfies the rightsized
+      requirements, surface the conflict and fall back to unpinned.
+    inputs:
+      - "ba_review_packet.family_pin, processor_pin"
+      - "Azure Retail Price API SKU metadata (family, processor)"
+    output:
+      engine_field: "per_vm_l2[].family_applied, .processor_applied"
+      excel_cell: "n/a"
+    fallbacks:
+      - condition: "Pinned family/processor yields no candidate SKU for a VM"
+        action: "Fall back to unpinned matching; flag per-VM that the pin was not honoured."
+    citations:
+      - source: "Microsoft R&D — VMware/OnPrem to Azure Mappings"
+        anchor: "R&D.OPTIONAL.FAMILY_PROCESSOR (slide 5)"
+        file: "training/baseline_workflow/azure_rd_rightsizing/canonical_formulas.md"
+    reference_expected: null
+    engine_status: UNIMPLEMENTED
+    engine_status_note: ""
+    reviewed: true
+
+# =============================================================================
+# Section G — HANDOFF TO LAYER 3
+# =============================================================================
+
+  - rule_id: L2.HANDOFF.001
+    topic: "Layer 2 emits per_vm_l2[] + pricing aggregates"
+    ba_action: |
+      Layer 2's output is the input to Layer 3. Required content:
+
+        per_vm_l2[]:                              # per KP.PER_VM_REPRISE
+          - name (joined to L1 per_vm[].name)
+          - rs_vcpus, rs_mem_gib, rs_disk_gib    # rightsized triple
+          - cpu_branch, memory_branch, storage_branch  # which formula was used
+          - cpu_floor_source                     # 'windows_compliance' | 'linux' | 'flag_off'
+          - sku_name, sku_vcpu, sku_memory_gib   # matched SKU
+          - family, processor, azure_region
+          - disk_layout = [(tier, count, gib_each)]
+          - pricing = {payg, ri1y, ri3y, sp1y, sp3y}  # each {usd_yr, available}
+          - storage_pricing = list[per-disk PAYG annual]
+          - sku_alternates[] (when L2.PRICING.002 surfaced any)
+          - retry_iterations, retry_failed       # from L2.RIGHTSIZE.CPU.RETRY
+
+        fyi_aggregates:
+          - sum_rs_vcpus, sum_rs_mem_gib, sum_rs_disk_gib
+          - azure_payg_usd_yr (headline)
+          - azure_ri1y_usd_yr, ri3y, sp1y, sp3y_usd_yr
+          - storage_payg_usd_yr
+          - vms_matched, vms_with_retry, vms_match_failed
+
+        ba_review_packet (L2 additions):
+          - utilisation_strategy_used
+          - reduction_pcts_used (cpu, mem, mem_buffer, storage, storage_buffer)
+          - missing_pricing_offers (list per offer code)
+          - sku_alternate_decisions[]
+    inputs: []
+    output:
+      engine_field: "Layer 2 PipelineResult extension"
+      excel_cell: "Consumption Plan Wk1"
+    fallbacks: []
+    citations:
+      - source: "BA Layer 2 transcript"
+        timestamp: "00:20:39"
+        excerpt: "we sum up the consumption to annual to show here is pay as you go annual, here is one year reserved instance annual, here is three year reserved instance annual, and then if there's one in three year savings plan, Then we'll include those as well"
+    reference_expected: null
+    engine_status: PARTIAL
+    engine_status_note: "Engine emits PAYG aggregates only; needs the four reserved/savings totals + per-VM detail."
+    reviewed: true

@@ -10,7 +10,7 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ### What changed
 
-Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1–C3, H4, M1) that produced incorrect outputs in prior UHHS analysis — bugs the existing Excel cross-check could not detect because they affected inputs, not the financial model math.
+Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1–C3, H4, M1) that produced incorrect outputs in prior Customer A analysis — bugs the existing Excel cross-check could not detect because they affected inputs, not the financial model math.
 
 **`engine/fact_checker.py`:**
 - New `_check_pipeline_plausibility(inputs)` — catches: `annual_compute_consumption_lc_y10 = 0` (broken pricing cache, C1), implied storage rate outside `$0.01–$0.50/GB/mo` (wrong `gb_rate`, C2), `azure_storage_gb = 0` with on-prem storage present (wrong storage source, C3), `num_vms = 0` or `allocated_vcpu = 0` (silent parse failure), `vcpu_per_core` outside `[1.0–8.0]` (zero-vCPU hosts, H4), `azure_vcpu > 2× on-prem vCPU` (host-proxy anomaly, M1), compute cost/vCPU outside `$150–$8k/yr`.
@@ -19,7 +19,7 @@ Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1
 - `passed_overall` now requires zero pipeline warnings in addition to zero FAIL checks.
 
 **`app/pages/fact_checker_page.py`:**
-- New **"🚦 Pipeline Health"** tab (first tab) — 12 targeted checks covering all UHHS failure modes; shows red banner with remediation instructions when any check fails; raw metric tiles for VMs, vCPU, Azure vCPU, storage GB, compute cost/yr, storage cost/yr.
+- New **"🚦 Pipeline Health"** tab (first tab) — 12 targeted checks covering all Customer A failure modes; shows red banner with remediation instructions when any check fails; raw metric tiles for VMs, vCPU, Azure vCPU, storage GB, compute cost/yr, storage cost/yr.
 - Excel Cross-Check tab now also surfaces pipeline warnings above the check table.
 - Tab order: 🚦 Pipeline Health → 🧮 Engine Sanity → 📋 Excel Cross-Check.
 
@@ -30,7 +30,7 @@ Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1
 
 ### What changed
 
-Resolved 12 bugs identified in post-engagement UHHS analysis. Full details in `FIX_PROPOSAL.md`.
+Resolved 12 bugs identified in post-engagement Customer A analysis. Full details in `FIX_PROPOSAL.md`.
 
 **Critical (C-series):**
 - **C1 — Broken pricing cache guard** (`azure_sku_matcher.py`): empty/all-zero cache files were silently read, producing `$0` compute costs. Added guard in `_read_vm_price_cache` / `_read_cache` to reject empty or all-zero caches.
@@ -546,7 +546,7 @@ Full validation run against the reference workbook. Five engine bugs fixed:
 4. Migration ramp: off-by-one in `(ramp_y − ramp_{y−1})` incremental fraction calculation
 5. NPV: Y0 was being discounted (should be undiscounted)
 
-`scripts/validate_vs_reliance.py` added: Track A (parser accuracy vs workbook inputs) and Track B (engine output accuracy vs workbook financial outputs).
+`scripts/validate_vs_reference.py` added: Track A (parser accuracy vs workbook inputs) and Track B (engine output accuracy vs workbook financial outputs).
 
 ---
 

@@ -1,8 +1,8 @@
-"""Probe the Reliance 2a-Consumption Plan sheet specifically."""
+"""Probe the reference 2a-Consumption Plan sheet specifically."""
 import openpyxl
 
 wb = openpyxl.load_workbook(
-    "Reliance_BV Benchmark Business Case v6.xlsm", keep_vba=True, data_only=True
+    "<reference-workbook.xlsm>", keep_vba=True, data_only=True
 )
 
 cp = wb["2a-Consumption Plan Wk1"]

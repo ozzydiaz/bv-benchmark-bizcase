@@ -1,0 +1,567 @@
+WEBVTT
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/9-0
+00:00:03.527 --> 00:00:11.829
+<v Ozzie Diaz>This recording and this transcript is
+going to serve as training data for</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/9-1
+00:00:11.829 --> 00:00:20.019
+<v Ozzie Diaz>refactoring the layer one process for the
+business value, business case,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/9-2
+00:00:20.019 --> 00:00:22.487
+<v Ozzie Diaz>application, and code.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/15-0
+00:00:24.567 --> 00:00:32.591
+<v Ozzie Diaz>So usually the first step that the human
+or the business value analyst in this</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/15-1
+00:00:32.591 --> 00:00:38.482
+<v Ozzie Diaz>example achieves,
+usually the first step is we get a file</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/15-2
+00:00:38.482 --> 00:00:43.967
+<v Ozzie Diaz>from the customer. Now,
+in this example here, you see</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/20-0
+00:00:44.567 --> 00:00:51.245
+<v Ozzie Diaz>It's an RV tools file,
+and there could be many different flavors</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/20-1
+00:00:51.245 --> 00:00:58.744
+<v Ozzie Diaz>of RV tools files that we'll get,
+and we have to be able to adapt to all</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/20-2
+00:00:58.744 --> 00:01:03.367
+<v Ozzie Diaz>those different flavors and use
+assumptions.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/25-0
+00:01:03.527 --> 00:01:10.171
+<v Ozzie Diaz>or fallback mechanisms if need be,
+if all of the full information is not</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/25-1
+00:01:10.171 --> 00:01:15.813
+<v Ozzie Diaz>there. Very typically,
+the RV Tools files that we'll get will</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/25-2
+00:01:15.813 --> 00:01:22.275
+<v Ozzie Diaz>not be like what you see here.
+This is a full RV Tools export with all</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/25-3
+00:01:22.275 --> 00:01:23.367
+<v Ozzie Diaz>of the tabs.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/29-0
+00:01:23.687 --> 00:01:29.514
+<v Ozzie Diaz>Some are required,
+some are optional or not required,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/29-1
+00:01:29.514 --> 00:01:36.420
+<v Ozzie Diaz>but when we ask a customer to send us an
+RV tools file, we say,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/29-2
+00:01:36.420 --> 00:01:42.247
+<v Ozzie Diaz>if you could please minimally include the
+V info tab.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/31-0
+00:01:43.447 --> 00:01:45.767
+<v Ozzie Diaz>with all the VMs and all the metadata.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/37-0
+00:01:47.127 --> 00:01:56.087
+<v Ozzie Diaz>The V host tab with all of the V all of
+the physical hosts that are hosting the</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/37-1
+00:01:56.087 --> 00:02:03.927
+<v Ozzie Diaz>VMs and their metadata and the V
+partition tab for all of the storage</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/37-2
+00:02:03.927 --> 00:02:08.407
+<v Ozzie Diaz>metadata related to what is attached to.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/41-0
+00:02:08.727 --> 00:02:15.825
+<v Ozzie Diaz>the hosts and being utilized by the VMs.
+That's the minimum that we usually</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/41-1
+00:02:15.825 --> 00:02:21.710
+<v Ozzie Diaz>require. So in other words,
+do not rely on there being vCPU or</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/41-2
+00:02:21.710 --> 00:02:26.846
+<v Ozzie Diaz>vMemory there.
+We have to be able to adapt to at least</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/41-3
+00:02:26.846 --> 00:02:27.967
+<v Ozzie Diaz>the minimum.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/46-0
+00:02:28.447 --> 00:02:35.586
+<v Ozzie Diaz>that we ask customers. However,
+sometimes customers will not send us even</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/46-1
+00:02:35.586 --> 00:02:40.217
+<v Ozzie Diaz>that.
+They may send us only the V info tab with</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/46-2
+00:02:40.217 --> 00:02:45.040
+<v Ozzie Diaz>VM names.
+Sometimes the VM names are redacted and</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/46-3
+00:02:45.040 --> 00:02:48.127
+<v Ozzie Diaz>they'll just have in the column.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/51-0
+00:02:48.367 --> 00:02:54.511
+<v Ozzie Diaz>Not necessarily column A,
+but in this example, let's say, yes,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/51-1
+00:02:54.511 --> 00:03:01.338
+<v Ozzie Diaz>in column A is the VM name.
+Sometimes customers will take the VM name</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/51-2
+00:03:01.338 --> 00:03:08.847
+<v Ozzie Diaz>and redact it to just a number or
+something random. We need to be able to...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/53-0
+00:03:09.327 --> 00:03:12.607
+<v Ozzie Diaz>adapt to that situation as well.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/58-0
+00:03:14.447 --> 00:03:23.478
+<v Ozzie Diaz>Another aspect is utilization telemetry
+or utilization metadata in either the</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/58-1
+00:03:23.478 --> 00:03:33.087
+<v Ozzie Diaz>vinfo and or the vhost and or vpartition
+if we end up getting vhost or vpartition.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/60-0
+00:03:33.887 --> 00:03:40.687
+<v Ozzie Diaz>Ideally, that utilization data,
+and in particular for CPUs,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/65-0
+00:03:41.847 --> 00:03:47.390
+<v Ozzie Diaz>memory and obviously the storage.
+For the CPUs,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/65-1
+00:03:47.390 --> 00:03:54.781
+<v Ozzie Diaz>sometimes there's utilization data in
+there. In this vinfo tab,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/65-2
+00:03:54.781 --> 00:04:01.247
+<v Ozzie Diaz>it does not look like we have utilization
+for the CPUs.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/70-0
+00:04:01.567 --> 00:04:11.308
+<v Ozzie Diaz>So the objective of having utilization
+for the CPUs is to be able to right size.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/70-1
+00:04:11.308 --> 00:04:20.207
+<v Ozzie Diaz>And the right size is for the future
+state Azure Virtual Machine mapping.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/75-0
+00:04:20.287 --> 00:04:26.553
+<v Ozzie Diaz>to a least cost Azure virtual machine
+mapping that's ideally right-sized to how</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/75-1
+00:04:26.553 --> 00:04:32.662
+<v Ozzie Diaz>that the on-premise, in other words,
+the VMs that are on-prem that we've been</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/75-2
+00:04:32.662 --> 00:04:38.927
+<v Ozzie Diaz>provided the RV tools export of how it's
+being used, at least in that snapshot.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/79-0
+00:04:39.887 --> 00:04:45.063
+<v Ozzie Diaz>If we don't have that,
+then we have to have an assumption or</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/79-1
+00:04:45.063 --> 00:04:51.257
+<v Ozzie Diaz>fallback percentage of utilization,
+and that can be codified in the app.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/79-2
+00:04:51.257 --> 00:04:53.887
+<v Ozzie Diaz>The same thing goes for memory.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/83-0
+00:04:55.047 --> 00:05:00.630
+<v Ozzie Diaz>Now,
+memory in the RV tools is generally</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/83-1
+00:05:00.630 --> 00:05:08.527
+<v Ozzie Diaz>provided in a MIB or MIB format.
+We need to be able to...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/88-0
+00:05:09.647 --> 00:05:20.130
+<v Ozzie Diaz>convert that to gigabytes decimal so that
+the retail pricing API for Azure can be</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/88-1
+00:05:20.130 --> 00:05:28.567
+<v Ozzie Diaz>mapped to how it expects the unit
+conversions to be in gigabytes.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/91-0
+00:05:29.087 --> 00:05:34.551
+<v Ozzie Diaz>Now for storage,
+there are two things that we need to</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/91-1
+00:05:34.551 --> 00:05:39.407
+<v Ozzie Diaz>collect for storage.
+One is for the on-premise.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/93-0
+00:05:41.647 --> 00:05:46.287
+<v Ozzie Diaz>portion of a total cost of ownership
+model or a business case.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/98-0
+00:05:47.567 --> 00:05:53.949
+<v Ozzie Diaz>We need to account for all the physical
+infrastructure that's on in the data</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/98-1
+00:05:53.949 --> 00:05:58.922
+<v Ozzie Diaz>center that's on-premise,
+because the customer paid for it,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/98-2
+00:05:58.922 --> 00:06:04.144
+<v Ozzie Diaz>it is depreciating the full extent of
+that infrastructure. So,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/98-3
+00:06:04.144 --> 00:06:05.967
+<v Ozzie Diaz>for the purposes of...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/101-0
+00:06:06.527 --> 00:06:16.978
+<v Ozzie Diaz>the on-premise counts,
+we use the provision MIB metadata per VM</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/101-1
+00:06:16.978 --> 00:06:18.447
+<v Ozzie Diaz>in vInfo.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/107-0
+00:06:19.487 --> 00:06:24.129
+<v Ozzie Diaz>And for the overall amount of storage,
+now granted,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/107-1
+00:06:24.129 --> 00:06:29.841
+<v Ozzie Diaz>each VM has its own amount of storage in
+there. And as you see,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/107-2
+00:06:29.841 --> 00:06:35.107
+<v Ozzie Diaz>it is in MIB format.
+So that would need to be converted to</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/107-3
+00:06:35.107 --> 00:06:39.927
+<v Ozzie Diaz>gigabytes, decimal,
+for ultimately in the next layer.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/110-0
+00:06:40.407 --> 00:06:45.716
+<v Ozzie Diaz>which is not this recording,
+for the lookup in the least cost VM</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/110-1
+00:06:45.716 --> 00:06:50.207
+<v Ozzie Diaz>matching using the retail,
+the Azure Retail Price API.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/115-0
+00:06:51.647 --> 00:06:57.353
+<v Ozzie Diaz>But we also need to capture the in use
+MIB, the in use storage,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/115-1
+00:06:57.353 --> 00:07:04.574
+<v Ozzie Diaz>have to do the same GB decimal conversion.
+This tells us the utilization of that</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/115-2
+00:07:04.574 --> 00:07:08.765
+<v Ozzie Diaz>storage.
+So that will need to be put away for,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/115-3
+00:07:08.765 --> 00:07:12.687
+<v Ozzie Diaz>again, the next major step,
+the next layer.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/120-0
+00:07:13.407 --> 00:07:25.507
+<v Ozzie Diaz>of the business case development for
+finding managed disk sizes to meet the in</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/120-1
+00:07:25.507 --> 00:07:31.327
+<v Ozzie Diaz>use MIB, but in gigabytes decimal for.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/125-0
+00:07:32.527 --> 00:07:36.754
+<v Ozzie Diaz>for price matching in the Azure Retail
+Price API.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/125-1
+00:07:36.754 --> 00:07:42.924
+<v Ozzie Diaz>So we need to be able to collect both.
+And also note, this is important,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/125-2
+00:07:42.924 --> 00:07:48.672
+<v Ozzie Diaz>that do not assume that it's going to be
+in these column locations.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/125-3
+00:07:48.672 --> 00:07:50.447
+<v Ozzie Diaz>You have to look for.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/130-0
+00:07:51.527 --> 00:07:58.268
+<v Ozzie Diaz>the title or something close to that
+title. It might say provisioned,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/130-1
+00:07:58.268 --> 00:08:04.046
+<v Ozzie Diaz>it might say capacity,
+it may or may not include MIB in the</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/130-2
+00:08:04.046 --> 00:08:08.764
+<v Ozzie Diaz>title,
+but assume that if it came from RV Tools,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/130-3
+00:08:08.764 --> 00:08:09.727
+<v Ozzie Diaz>it is MIB.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/132-0
+00:08:11.567 --> 00:08:16.378
+<v Ozzie Diaz>format. And same thing with in use.
+Usually it's in use,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/132-1
+00:08:16.378 --> 00:08:19.247
+<v Ozzie Diaz>it may or may not include the MIB.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/137-0
+00:08:20.607 --> 00:08:27.039
+<v Ozzie Diaz>Maybe it might say utilized.
+So we have to use similar keywords or</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/137-1
+00:08:27.039 --> 00:08:33.663
+<v Ozzie Diaz>analogous keywords to find the right
+columns that we're looking for.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/137-2
+00:08:33.663 --> 00:08:40.287
+<v Ozzie Diaz>Can't always assume it's going to say
+provisioned MIB or in use MIB.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/140-0
+00:08:42.607 --> 00:08:50.434
+<v Ozzie Diaz>So, similar here in VHost,
+in VHost we have all of the physical</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/140-1
+00:08:50.434 --> 00:08:51.167
+<v Ozzie Diaz>hosts.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/142-0
+00:08:52.527 --> 00:08:55.007
+<v Ozzie Diaz>Uh, one thing that...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/145-0
+00:08:56.287 --> 00:09:01.608
+<v Ozzie Diaz>We'll talk about this in the next layer
+in the next recording when we talk about</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/145-1
+00:09:01.608 --> 00:09:02.527
+<v Ozzie Diaz>Azure pricing.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/150-0
+00:09:05.167 --> 00:09:11.782
+<v Ozzie Diaz>using the Azure Retail Price API for
+doing the least cost Azure VM mapping.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/150-1
+00:09:11.782 --> 00:09:17.962
+<v Ozzie Diaz>So we may or may not have the data,
+may or may not have the vHost tab.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/150-2
+00:09:17.962 --> 00:09:23.707
+<v Ozzie Diaz>There's a lot of data in here.
+Here we actually do see CPU usage,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/150-3
+00:09:23.707 --> 00:09:26.927
+<v Ozzie Diaz>so utilization of that physical host.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/155-0
+00:09:27.407 --> 00:09:37.333
+<v Ozzie Diaz>Although it's debatable as to whether we
+can apply the CPU usage percentage or</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/155-1
+00:09:37.333 --> 00:09:43.113
+<v Ozzie Diaz>some analogous term for that from the V
+host,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/155-2
+00:09:43.113 --> 00:09:47.887
+<v Ozzie Diaz>if we were provided a V host to apply.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/160-0
+00:09:48.447 --> 00:09:53.781
+<v Ozzie Diaz>to those VMs running on that host.
+That's one way to do it,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/160-1
+00:09:53.781 --> 00:10:00.892
+<v Ozzie Diaz>and we should calculate it and present
+that out to the business analyst that is</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/160-2
+00:10:00.892 --> 00:10:06.047
+<v Ozzie Diaz>running the business case development in
+the application.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/163-0
+00:10:07.247 --> 00:10:13.087
+<v Ozzie Diaz>There's also other metadata that we'll be
+capturing,</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/163-1
+00:10:13.087 --> 00:10:18.927
+<v Ozzie Diaz>but we'll talk about that in the next
+section, so...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/164-0
+00:10:19.887 --> 00:10:20.167
+<v Ozzie Diaz>The.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/168-0
+00:10:23.887 --> 00:10:28.207
+<v Ozzie Diaz>Yeah, I think those are,
+I think those are the key.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/170-0
+00:10:29.287 --> 00:10:34.287
+<v Ozzie Diaz>metadata in vHost if we were given vHost.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/171-0
+00:10:35.567 --> 00:10:35.967
+<v Ozzie Diaz>Um...</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/177-0
+00:10:39.567 --> 00:10:43.513
+<v Ozzie Diaz>Yeah,
+and then obviously there's a lot of data</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/177-1
+00:10:43.513 --> 00:10:50.398
+<v Ozzie Diaz>in the V partition across all the drives
+and the partitions on the drives as they</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/177-2
+00:10:50.398 --> 00:10:56.527
+<v Ozzie Diaz>pertain to what's attached to the
+physical host related back to the VMs.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/180-0
+00:10:58.367 --> 00:11:05.727
+<v Ozzie Diaz>So the summary here is,
+is we have to be able to.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/185-0
+00:11:07.807 --> 00:11:13.484
+<v Ozzie Diaz>Oh,
+and we also want to collect all the VMs</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/185-1
+00:11:13.484 --> 00:11:22.774
+<v Ozzie Diaz>for the on-premise inventory.
+So powered on and powered off needs to be</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/185-2
+00:11:22.774 --> 00:11:28.967
+<v Ozzie Diaz>collected and counted in the overall
+inventory.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/190-0
+00:11:29.327 --> 00:11:32.834
+<v Ozzie Diaz>Again, why?
+Because they've already paid for that</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/190-1
+00:11:32.834 --> 00:11:36.833
+<v Ozzie Diaz>infrastructure,
+and irrespective of whether it's sitting</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/190-2
+00:11:36.833 --> 00:11:41.112
+<v Ozzie Diaz>there in a powered off state,
+it's still there depreciating.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/190-3
+00:11:41.112 --> 00:11:46.723
+<v Ozzie Diaz>It will be a different situation for the
+next layer of processing for doing the</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/190-4
+00:11:46.723 --> 00:11:48.687
+<v Ozzie Diaz>least cost Azure VM mapping.</v>
+
+6bcafd39-fc39-4b6a-8d54-ea8740a9e903/191-0
+00:11:49.327 --> 00:11:52.367
+<v Ozzie Diaz>in the Azure Retail Price API.</v>

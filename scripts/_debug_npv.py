@@ -6,7 +6,7 @@ from engine import status_quo, retained_costs, depreciation, financial_case
 import openpyxl
 
 wb = openpyxl.load_workbook(
-    "Reliance_BV Benchmark Business Case v6.xlsm", keep_vba=True, data_only=True
+    "<reference-workbook.xlsm>", keep_vba=True, data_only=True
 )
 inputs = build_inputs_from_workbook(wb)
 bm = BenchmarkConfig.from_yaml(str(_BENCHMARKS_YAML))

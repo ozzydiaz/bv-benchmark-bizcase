@@ -1,4 +1,4 @@
-"""Probe D31 productivity toggle and IT admin formula linkage across Template and Reliance."""
+"""Probe D31 productivity toggle and IT admin formula linkage across Template and reference."""
 import pathlib, sys, openpyxl
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
@@ -6,9 +6,9 @@ def load(name):
     return openpyxl.load_workbook(name, data_only=True, keep_vba=True)
 
 wb_t = load("Template_BV Benchmark Business Case v6.xlsm")
-wb_r = load("Reliance_BV Benchmark Business Case v6.xlsm")
+wb_r = load("<reference-workbook.xlsm>")
 
-for label, wb in [("TEMPLATE", wb_t), ("RELIANCE", wb_r)]:
+for label, wb in [("TEMPLATE", wb_t), ("REFERENCE", wb_r)]:
     print(f"\n{'='*70}")
     print(f"  {label}")
     print(f"{'='*70}")

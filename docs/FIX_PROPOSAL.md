@@ -1,6 +1,6 @@
 # BV Benchmark Business Case — Targeted Fix Proposal
-**File:** UHHS_RVTools_export_all_2024-10-29  
-**Reference:** UHHS-analysis-feedback.md  
+**File:** <customer-rvtools-export>  
+**Reference:** customer_a-analysis-feedback.md  
 **Model source of truth:** Template_BV Benchmark Business Case v6.xlsm  
 **Date:** 2026-04-xx
 
@@ -192,7 +192,7 @@ if vcpus_per_core > 0:   # exclude hosts with no ratio data
 **File:** `engine/consumption_builder.py` (`resolve_vm_utilisation()`)  
 
 **User requirement:** "Ignore vCPU and vMemory tabs entirely."  
-**Root cause:** The VM name obfuscation in UHHS's export (`vm100`...`vm2661`) means `inv.vm_cpu_util` lookup always misses, but the host-proxy path still fires (using host-level CPU util from vHost), causing 641 anomaly VMs.
+**Root cause:** The VM name obfuscation in Customer A's export (`vm100`...`vm2661`) means `inv.vm_cpu_util` lookup always misses, but the host-proxy path still fires (using host-level CPU util from vHost), causing 641 anomaly VMs.
 
 **Change:** In `resolve_vm_utilisation()`, remove the telemetry branch entirely — always return `util_src = "fallback"` with `BenchmarkConfig.cpu_util_fallback_factor` and `mem_util_fallback_factor`. The fallback is the defensible conservative assumption: `cpu_util = 0.65`, `mem_util = 0.65`.
 
@@ -259,7 +259,7 @@ Alternatively: count hosts where `CPU usage %` > 0 OR at least 1 VM assigned.
 ### Fix L1 — Backup Tag Misclassification
 **File:** `engine/rvtools_parser.py`  
 
-**Change:** The `_ENV_NONPROD_PATTERN` regex correctly does NOT match "Backups" or "Backup_CLE_ENT01". The `env_tagging_present` flag, however, is set to `True` whenever any VM has any non-empty Environment column value — and the UHHS export uses this column for Avamar backup job labels.
+**Change:** The `_ENV_NONPROD_PATTERN` regex correctly does NOT match "Backups" or "Backup_CLE_ENT01". The `env_tagging_present` flag, however, is set to `True` whenever any VM has any non-empty Environment column value — and the Customer A export uses this column for Avamar backup job labels.
 
 Rename and re-document: rename `env_tagging_present` → `lifecycle_env_tags_present` and only set it to `True` when the environment value matches a known lifecycle keyword (`prod`, `dev`, `test`, `staging`, `uat`, `qa`, etc.) — not any arbitrary non-empty string.
 
@@ -299,7 +299,7 @@ Rename and re-document: rename `env_tagging_present` → `lifecycle_env_tags_pre
 1. **C2**: Fix `_DEFAULT_GB_RATE` (1-line change + cache clear)  
 2. **C1**: Add empty-cache guard in `_read_cache()` + delete broken cache files  
 3. Verify pricing by running `scripts/validate_pricing_cache.py`  
-4. Re-run UHHS file end-to-end — Azure compute and storage costs should now be non-zero
+4. Re-run Customer A file end-to-end — Azure compute and storage costs should now be non-zero
 
 ### Phase 2 — Parser inventory fixes (2–4 hours)
 5. **H1**: Count template VMs in TCO baseline  
@@ -321,7 +321,7 @@ Rename and re-document: rename `env_tagging_present` → `lifecycle_env_tags_pre
 17. **L1**: Fix `env_tagging_present` → `lifecycle_env_tags_present`  
 18. Create `scripts/validate_pricing_cache.py`  
 19. Update `SKILL.md` with all 4 new sections listed above  
-20. Final end-to-end run on UHHS file; compare financial outputs to BA comparison doc
+20. Final end-to-end run on Customer A file; compare financial outputs to BA comparison doc
 
 ---
 

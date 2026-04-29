@@ -1,10 +1,10 @@
-# UHHS Analysis — Independent Review & Recommendations
+# Customer A Analysis — Independent Review & Recommendations
 
 **Reviewer:** GitHub Copilot CLI (Claude Opus 4.6)  
 **Date:** 2026-04-16  
-**Input file:** `UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx`  
+**Input file:** `<customer-rvtools.xlsx>`  
 **Engine version:** v1.2.3  
-**Scope:** Critical review of `UHHS-analysis-copilot_reco.md`, independent verification of numbers, and alternative recommendations.
+**Scope:** Critical review of `customer_a-analysis-copilot_reco.md`, independent verification of numbers, and alternative recommendations.
 
 ---
 
@@ -139,7 +139,7 @@ I agree with Scenario A from the prior analysis. This is the correct first step.
 
 The extra step (auto-switching to fallback) is critical. Without it, the warning is transparency-only — users still get inflated numbers. With it, the business case is conservatively correct even without a re-export.
 
-**Expected impact on UHHS file:**
+**Expected impact on Customer A file:**
 - Azure vCPU: 18,344 → ~7,021 (52% reduction)
 - Azure memory: 109,641 → ~48,952 GB (28% reduction)
 - Compute cost: ~$5.3M → ~$2.0M/yr (rough estimate)
@@ -226,7 +226,7 @@ The user's feedback states: *"Using the data from the app, the benchmark model r
 
 This is the most concerning item because it suggests that even when the same inputs are used, the engine and the xa2 Excel workbook produce different financial results. A systematic reconciliation is needed:
 
-1. **Freeze a test case**: Take the pipeline's output for UHHS (the inputs object) and feed the exact same numbers into the xa2 workbook manually
+1. **Freeze a test case**: Take the pipeline's output for Customer A (the inputs object) and feed the exact same numbers into the xa2 workbook manually
 2. **Compare line-by-line**: Each of the 34 rows in the Detailed Financial Case sheet, for all 10 years
 3. **Isolate divergences**: Likely candidates are:
    - Depreciation schedule calculation (straight-line vs. look-back methodology)
@@ -269,7 +269,7 @@ This should be the highest-priority investigation after Recommendation 1, becaus
 
 ## 8. Notes on the User Feedback File
 
-The `UHHS-analysis-feedback.md` file raises several valid discrepancies that are **not addressed** in the Copilot report:
+The `customer_a-analysis-feedback.md` file raises several valid discrepancies that are **not addressed** in the Copilot report:
 
 1. **VM count 2,831 vs 2,661**: Powered-on filtering. → Recommendation #3
 2. **ESX host 242 vs 280**: Likely disconnected host filtering. → Recommendation #2

@@ -1,0 +1,1944 @@
+WEBVTT
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/4-0
+00:00:06.199 --> 00:00:10.274
+<v Ozzie Diaz>Okay,
+this is the last layer and the most</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/4-1
+00:00:10.274 --> 00:00:15.805
+<v Ozzie Diaz>difficult one.
+This is where we build upon layer one and</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/4-2
+00:00:15.805 --> 00:00:20.656
+<v Ozzie Diaz>layer two.
+And then now are building the business</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/4-3
+00:00:20.656 --> 00:00:25.119
+<v Ozzie Diaz>case and the financials for the scenarios.
+So</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/6-0
+00:00:25.599 --> 00:00:35.921
+<v Ozzie Diaz>So we've calculated Azure consumption for
+the in-scope or the powered on virtual</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/6-1
+00:00:35.921 --> 00:00:42.165
+<v Ozzie Diaz>machines,
+and they've been least cost matched to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/6-2
+00:00:42.165 --> 00:00:43.439
+<v Ozzie Diaz>Azure VMs.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/7-0
+00:00:44.319 --> 00:00:50.824
+<v Ozzie Diaz>So we have that.
+And now this is what the human business</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/7-1
+00:00:50.824 --> 00:00:56.187
+<v Ozzie Diaz>analyst does.
+This is where I need significant</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/7-2
+00:00:56.187 --> 00:01:02.919
+<v Ozzie Diaz>refactoring to be considered for the
+current code base for</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/8-0
+00:01:03.399 --> 00:01:05.039
+<v Ozzie Diaz>A project in question.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/9-0
+00:01:06.159 --> 00:01:06.879
+<v Ozzie Diaz>On GitHub.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/10-0
+00:01:07.759 --> 00:01:15.446
+<v Ozzie Diaz>So the way the human starts about it is
+we have this benchmark business case</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/10-1
+00:01:15.446 --> 00:01:19.439
+<v Ozzie Diaz>template that we fill in. And there are.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/11-0
+00:01:21.759 --> 00:01:27.097
+<v Ozzie Diaz>There are a variety of,
+it's a very complicated template where it</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/11-1
+00:01:27.097 --> 00:01:33.566
+<v Ozzie Diaz>was reverse engineered to some extent,
+so we might need to do that again in the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/11-2
+00:01:33.566 --> 00:01:37.367
+<v Ozzie Diaz>refactoring.
+But some of the key tabs that the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/11-3
+00:01:37.367 --> 00:01:40.359
+<v Ozzie Diaz>business analyst does take a look at.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/12-0
+00:01:40.959 --> 00:01:47.778
+<v Ozzie Diaz>are the following. The client variables,
+that's where we input the current</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/12-1
+00:01:47.778 --> 00:01:53.596
+<v Ozzie Diaz>on-premise inventory,
+because that is what develops the current</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/12-2
+00:01:53.596 --> 00:01:59.959
+<v Ozzie Diaz>state scenario for the business case and
+the total cost of ownership.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/13-0
+00:02:00.079 --> 00:02:05.396
+<v Ozzie Diaz>Of what is in place now,
+if and if they did nothing,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/13-1
+00:02:05.396 --> 00:02:13.020
+<v Ozzie Diaz>this is their financial outlook. Now,
+there are an awful lot of assumptions</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/13-2
+00:02:13.020 --> 00:02:19.239
+<v Ozzie Diaz>that are built into this template here,
+and this assumptions.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/14-0
+00:02:19.839 --> 00:02:24.639
+<v Ozzie Diaz>Tab is what we use. For the most part,
+we leave this alone,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/14-1
+00:02:24.639 --> 00:02:29.599
+<v Ozzie Diaz>but you see a whole variety of
+assumptions across categories,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/14-2
+00:02:29.599 --> 00:02:35.599
+<v Ozzie Diaz>such as servers and storage. Well,
+starting from the top, we have the WAC,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/14-3
+00:02:35.599 --> 00:02:39.359
+<v Ozzie Diaz>which is the weighted average cost of
+capital.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/15-0
+00:02:39.679 --> 00:02:44.721
+<v Ozzie Diaz>We have that set at 7%.
+Hours in one year are the assumption</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/15-1
+00:02:44.721 --> 00:02:50.093
+<v Ozzie Diaz>there, 8,760. And then energy assumptions,
+you know, we do make,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/15-2
+00:02:50.093 --> 00:02:56.208
+<v Ozzie Diaz>but those can be derived from the
+internet if need be by the application.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/15-3
+00:02:56.208 --> 00:02:59.679
+<v Ozzie Diaz>But then we have a variety of assumptions.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/16-0
+00:03:00.079 --> 00:03:07.591
+<v Ozzie Diaz>across categories of servers and storage.
+So this is ratios of VCPUs to servers,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/16-1
+00:03:07.591 --> 00:03:14.917
+<v Ozzie Diaz>ratios of VCPU or VMs to physical server
+ratios, VCPU to physical core ratios,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/16-2
+00:03:14.917 --> 00:03:18.719
+<v Ozzie Diaz>virtual memory of physical memory ratios,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/17-0
+00:03:20.399 --> 00:03:24.434
+<v Ozzie Diaz>etc.
+And things like acquisition costs down to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/17-1
+00:03:24.434 --> 00:03:30.356
+<v Ozzie Diaz>a unit economic measure of a cost per
+core, a cost per GB of memory,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/17-2
+00:03:30.356 --> 00:03:35.849
+<v Ozzie Diaz>a cost per GB of storage.
+So those are the sorts of assumptions</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/17-3
+00:03:35.849 --> 00:03:36.879
+<v Ozzie Diaz>that go into</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/18-0
+00:03:38.239 --> 00:03:44.842
+<v Ozzie Diaz>calculating what the current state,
+or we call status quo sometimes,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/18-1
+00:03:44.842 --> 00:03:50.105
+<v Ozzie Diaz>for the on-premise financials for a
+customer scenario.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/18-2
+00:03:50.105 --> 00:03:57.759
+<v Ozzie Diaz>And those assumptions will also go into
+even the future state, Azure migration,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/19-0
+00:03:58.159 --> 00:04:01.725
+<v Ozzie Diaz>scenario for accounting for retained
+costs.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/19-1
+00:04:01.725 --> 00:04:08.369
+<v Ozzie Diaz>So whatever's left behind in their data
+center in the event that it is not a full</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/19-2
+00:04:08.369 --> 00:04:13.149
+<v Ozzie Diaz>data center exit.
+A full data center exit will effectively</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/19-3
+00:04:13.149 --> 00:04:17.119
+<v Ozzie Diaz>remove all of those on-premise cost
+assumptions.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/20-0
+00:04:17.359 --> 00:04:25.423
+<v Ozzie Diaz>over time as the migration plan occurs.
+And we have a couple of different high</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/20-1
+00:04:25.423 --> 00:04:30.730
+<v Ozzie Diaz>order migration plan assumptions.
+One is 12 months,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/20-2
+00:04:30.730 --> 00:04:38.079
+<v Ozzie Diaz>so basically ramping down from on-premise
+execution of their workloads.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/21-0
+00:04:38.399 --> 00:04:44.275
+<v Ozzie Diaz>over the course of 12 months as
+simultaneously they are ramping up on</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/21-1
+00:04:44.275 --> 00:04:48.472
+<v Ozzie Diaz>their Azure footprint.
+So during those 12 months,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/21-2
+00:04:48.472 --> 00:04:55.102
+<v Ozzie Diaz>there is this notion of dual run costs.
+Not only are there still some costs on</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/21-3
+00:04:55.102 --> 00:04:58.879
+<v Ozzie Diaz>premise that are ramping down,
+but there are</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/22-0
+00:04:59.119 --> 00:05:02.665
+<v Ozzie Diaz>new costs,
+monthly costs in the form of Azure</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/22-1
+00:05:02.665 --> 00:05:08.832
+<v Ozzie Diaz>consumption that are ramping up as they
+migrate virtual machines over to Azure.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/22-2
+00:05:08.832 --> 00:05:13.919
+<v Ozzie Diaz>So that's dual run costs.
+And we have to account for that as well</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/22-3
+00:05:13.919 --> 00:05:20.085
+<v Ozzie Diaz>in the financials. Other categories,
+network and fit out, licenses and support.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/22-4
+00:05:20.085 --> 00:05:20.239
+<v Ozzie Diaz>So</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/23-0
+00:05:20.479 --> 00:05:28.440
+<v Ozzie Diaz>Support and maintenance for hardware,
+for software licenses. Here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/23-1
+00:05:28.440 --> 00:05:36.282
+<v Ozzie Diaz>we account for Windows Server,
+SQL Server licenses, all editions,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/23-2
+00:05:36.282 --> 00:05:40.559
+<v Ozzie Diaz>as well as a virtualization license.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/24-0
+00:05:40.799 --> 00:05:44.959
+<v Ozzie Diaz>And VMware is a classic.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/25-0
+00:05:45.999 --> 00:05:51.710
+<v Ozzie Diaz>benchmark that we'll use for on-premise
+virtualization software,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/25-1
+00:05:51.710 --> 00:05:57.508
+<v Ozzie Diaz>a cost per year per core.
+And you see what's built in there right</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/25-2
+00:05:57.508 --> 00:06:02.604
+<v Ozzie Diaz>now is $208 per year per core for
+virtualization license.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/25-3
+00:06:02.604 --> 00:06:05.239
+<v Ozzie Diaz>And if it is in scope for this</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/26-0
+00:06:05.519 --> 00:06:11.398
+<v Ozzie Diaz>Business case analysis,
+things like backup software licenses and</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/26-1
+00:06:11.398 --> 00:06:18.723
+<v Ozzie Diaz>disaster recovery software licenses are
+accounted for here as well. In addition,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/26-2
+00:06:18.723 --> 00:06:24.239
+<v Ozzie Diaz>we see lease and power because it takes
+money for the space.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/27-0
+00:06:24.799 --> 00:06:29.651
+<v Ozzie Diaz>to operate a data center,
+and it also takes energy to run the data</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/27-1
+00:06:29.651 --> 00:06:33.488
+<v Ozzie Diaz>center as well.
+There are also bandwidth and telecom</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/27-2
+00:06:33.488 --> 00:06:38.629
+<v Ozzie Diaz>chargers because the telecom charges
+because the data center has to be</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/27-3
+00:06:38.629 --> 00:06:43.480
+<v Ozzie Diaz>connected to the internet.
+And then there's also the people costs,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/27-4
+00:06:43.480 --> 00:06:47.679
+<v Ozzie Diaz>right? And here it's IT, admin,
+various assumptions here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/28-0
+00:06:48.079 --> 00:06:57.187
+<v Ozzie Diaz>A high level one that we have is number
+of virtual machines per physical servers</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/28-1
+00:06:57.187 --> 00:07:02.585
+<v Ozzie Diaz>managed per a system administrator set to
+1200.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/28-2
+00:07:02.585 --> 00:07:08.319
+<v Ozzie Diaz>So these assumptions can also be fed back
+into the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/29-0
+00:07:08.439 --> 00:07:14.993
+<v Ozzie Diaz>the agent for refactoring also.
+But let's get started on starting to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/29-1
+00:07:14.993 --> 00:07:22.116
+<v Ozzie Diaz>enter in some numbers here. So again,
+this is the business analyst that is</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/29-2
+00:07:22.116 --> 00:07:27.530
+<v Ozzie Diaz>doing the number entry.
+So some of the assumptions here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/29-3
+00:07:27.530 --> 00:07:28.479
+<v Ozzie Diaz>US dollar,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/30-0
+00:07:29.519 --> 00:07:33.614
+<v Ozzie Diaz>Local currency,
+but we want to be able to support</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/30-1
+00:07:33.614 --> 00:07:38.363
+<v Ozzie Diaz>multiple currencies,
+at least we'll say the major country</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/30-2
+00:07:38.363 --> 00:07:42.785
+<v Ozzie Diaz>currencies,
+customer price levels for Windows Server,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/30-3
+00:07:42.785 --> 00:07:46.879
+<v Ozzie Diaz>SQL Server licenses,
+the most aggressive being...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/31-0
+00:07:47.319 --> 00:07:56.869
+<v Ozzie Diaz>D as in David for the biggest discount,
+even though the default is B in the model.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/31-1
+00:07:56.869 --> 00:08:02.162
+<v Ozzie Diaz>Are we exiting the entire data center or
+not?</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/31-2
+00:08:02.162 --> 00:08:07.799
+<v Ozzie Diaz>And is the data center exit proportional
+or not?</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/32-0
+00:08:08.799 --> 00:08:13.645
+<v Ozzie Diaz>or static,
+meaning proportional that during the ramp</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/32-1
+00:08:13.645 --> 00:08:18.125
+<v Ozzie Diaz>down of removing workloads from the data
+center,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/32-2
+00:08:18.125 --> 00:08:25.439
+<v Ozzie Diaz>we will show benefits of cost reductions
+over the course proportionally of that</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/32-3
+00:08:25.439 --> 00:08:27.999
+<v Ozzie Diaz>ramp down period, or static,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/33-0
+00:08:28.319 --> 00:08:34.965
+<v Ozzie Diaz>basically leave it all the same until the
+end of the migration period and then fall</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/33-1
+00:08:34.965 --> 00:08:40.266
+<v Ozzie Diaz>off the cliff on the data center cost.
+Hardware depreciation life,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/33-2
+00:08:40.266 --> 00:08:46.200
+<v Ozzie Diaz>five years is a typical standard or
+benchmark. Hardware actual usage life,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/33-3
+00:08:46.200 --> 00:08:49.839
+<v Ozzie Diaz>five years. Again,
+another typical benchmark.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/34-0
+00:08:50.079 --> 00:08:56.730
+<v Ozzie Diaz>expected future growth for on-premise,
+again, for modeling purposes, 2% per year,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/34-1
+00:08:56.730 --> 00:09:03.461
+<v Ozzie Diaz>hardware renewal during migration ramp up.
+We just have that as a 10% kind of rule</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/34-2
+00:09:03.461 --> 00:09:08.571
+<v Ozzie Diaz>of thumb as a percentage of hardware left
+on-premise. And yes,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/34-3
+00:09:08.571 --> 00:09:13.599
+<v Ozzie Diaz>we also do want to include the IT admin
+productivity benefit.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/35-0
+00:09:13.999 --> 00:09:19.060
+<v Ozzie Diaz>in the business case.
+So here is where the manual work happens</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/35-1
+00:09:19.060 --> 00:09:24.281
+<v Ozzie Diaz>for the business analyst,
+and we start plugging in numbers here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/35-2
+00:09:24.281 --> 00:09:28.217
+<v Ozzie Diaz>Now this into the client variables.
+Now this is,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/35-3
+00:09:28.217 --> 00:09:33.599
+<v Ozzie Diaz>it's time consuming sometimes,
+and we have to go searching for it.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/36-0
+00:09:34.159 --> 00:09:39.284
+<v Ozzie Diaz>in the RV tools file that is the basis
+for these counts.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/36-1
+00:09:39.284 --> 00:09:45.847
+<v Ozzie Diaz>In the business case application,
+these numbers would have been garnered</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/36-2
+00:09:45.847 --> 00:09:50.433
+<v Ozzie Diaz>already in the layer one data ingest and
+analysis.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/36-3
+00:09:50.433 --> 00:09:53.399
+<v Ozzie Diaz>But we're doing it manually here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/37-0
+00:09:53.759 --> 00:09:57.809
+<v Ozzie Diaz>So,
+I'm going to narrate the various notes</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/37-1
+00:09:57.809 --> 00:10:05.438
+<v Ozzie Diaz>that we use as guidance for the business
+analyst for how to find and enter those</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/37-2
+00:10:05.438 --> 00:10:10.901
+<v Ozzie Diaz>numbers. So, in this example here,
+for the number of VMs,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/37-3
+00:10:10.901 --> 00:10:14.479
+<v Ozzie Diaz>we go to the VM info tab and we count.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/38-0
+00:10:14.719 --> 00:10:21.792
+<v Ozzie Diaz>the number of all the VMs,
+and we don't know if it's column A or not.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/38-1
+00:10:21.792 --> 00:10:29.775
+<v Ozzie Diaz>It's wherever it might sit. So here,
+and because this is the on-premise count,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/38-2
+00:10:29.775 --> 00:10:34.119
+<v Ozzie Diaz>we're including all the hardware,
+not just</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/40-0
+00:10:34.279 --> 00:10:40.399
+<v Ozzie Diaz>the powered on VMs,
+so powered on and powered off.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/40-1
+00:10:40.399 --> 00:10:46.999
+<v Ozzie Diaz>So right now, I count 2,831,
+not including the header,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/40-2
+00:10:46.999 --> 00:10:49.639
+<v Ozzie Diaz>so I'll plug in 2,831.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/41-0
+00:10:50.839 --> 00:10:57.013
+<v Ozzie Diaz>And then for the number of physical
+servers, excluding the VM hosts,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/41-1
+00:10:57.013 --> 00:11:02.203
+<v Ozzie Diaz>in this example,
+we're just going to say 0 because all we</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/41-2
+00:11:02.203 --> 00:11:08.198
+<v Ozzie Diaz>have is the RV Tools file.
+There might be examples where there are</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/41-3
+00:11:08.198 --> 00:11:09.719
+<v Ozzie Diaz>physical servers.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/42-0
+00:11:09.959 --> 00:11:14.693
+<v Ozzie Diaz>that are not part of the virtualized
+environment.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/42-1
+00:11:14.693 --> 00:11:22.172
+<v Ozzie Diaz>They could be bare metal servers for high
+performance computing or running SAP</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/42-2
+00:11:22.172 --> 00:11:28.799
+<v Ozzie Diaz>databases or other reasons to have
+physical bare metal servers there.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/43-0
+00:11:29.799 --> 00:11:34.577
+<v Ozzie Diaz>And okay,
+now another calculation that we'll do</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/43-1
+00:11:34.577 --> 00:11:39.156
+<v Ozzie Diaz>here,
+even though this Excel spreadsheet does</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/43-2
+00:11:39.156 --> 00:11:45.626
+<v Ozzie Diaz>an automated calculation,
+we actually want to do an actual count</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/43-3
+00:11:45.626 --> 00:11:51.399
+<v Ozzie Diaz>because we have, in this example,
+we do have a vHost tab.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/44-0
+00:11:51.959 --> 00:11:57.732
+<v Ozzie Diaz>Now, otherwise,
+the number of physical servers,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/44-1
+00:11:57.732 --> 00:12:03.985
+<v Ozzie Diaz>which include the VM host,
+have an assumption here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/44-2
+00:12:03.985 --> 00:12:10.839
+<v Ozzie Diaz>which goes back to basically a
+calculation where it's...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/45-0
+00:12:13.959 --> 00:12:22.784
+<v Ozzie Diaz>the number of VMs divided by the
+benchmark assumptions K11 field and this</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/45-1
+00:12:22.784 --> 00:12:32.919
+<v Ozzie Diaz>and it is using it is using the benchmark
+assumption of VM to physical server ratio.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/46-0
+00:12:33.159 --> 00:12:36.667
+<v Ozzie Diaz>Of 12,
+now that's just a benchmark assumption,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/46-1
+00:12:36.667 --> 00:12:40.771
+<v Ozzie Diaz>but that's why,
+because we have the so that would be a</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/46-2
+00:12:40.771 --> 00:12:46.890
+<v Ozzie Diaz>fallback and and and it and it's so it's
+it's that it's the number of VMs divided</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/46-3
+00:12:46.890 --> 00:12:50.025
+<v Ozzie Diaz>by 12,
+which is the VM to physical server</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/46-4
+00:12:50.025 --> 00:12:52.039
+<v Ozzie Diaz>benchmark assumption ratio.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/47-0
+00:12:52.599 --> 00:12:56.610
+<v Ozzie Diaz>Plus,
+if we had physical servers that are not</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/47-1
+00:12:56.610 --> 00:13:02.714
+<v Ozzie Diaz>VM hosts, in this case, we don't here,
+but we have the VHost tab. So,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/47-2
+00:13:02.714 --> 00:13:07.509
+<v Ozzie Diaz>if we go over here to the VHost tab and
+we say, "Well,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/47-3
+00:13:07.509 --> 00:13:12.479
+<v Ozzie Diaz>what are the number of physical hosts?
+" and we see 280.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/48-0
+00:13:12.759 --> 00:13:18.635
+<v Ozzie Diaz>not including the header.
+So you see it's a little higher than what</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/48-1
+00:13:18.635 --> 00:13:23.559
+<v Ozzie Diaz>the benchmark assumption calculation
+would have yielded.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/49-0
+00:13:25.959 --> 00:13:32.553
+<v Ozzie Diaz>So, okay, so then next,
+we're calculating allocated virtual CPUs.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/49-1
+00:13:32.553 --> 00:13:38.047
+<v Ozzie Diaz>And then here,
+the guidance is to the business analyst</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/49-2
+00:13:38.047 --> 00:13:45.639
+<v Ozzie Diaz>is go to the V-info tab and sum up the
+number of CPUs in the V-info tab. So</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/50-0
+00:13:45.879 --> 00:13:49.799
+<v Ozzie Diaz>So, we'll go over here,
+so number of number of CPUs.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/51-0
+00:13:52.359 --> 00:13:55.879
+<v Ozzie Diaz>And that shows a sum of 548.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/52-0
+00:13:58.359 --> 00:14:03.487
+<v Ozzie Diaz>Oh no, no, no, no, the V info tab.
+I was in the wrong tab.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/52-1
+00:14:03.487 --> 00:14:09.483
+<v Ozzie Diaz>So we got to go to the V info tab,
+number of CPUs. Yes, there we go.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/52-2
+00:14:09.483 --> 00:14:15.479
+<v Ozzie Diaz>That's the right. So the sum of 15,330.
+We're going to plug that in.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/53-0
+00:14:18.359 --> 00:14:21.795
+<v Ozzie Diaz>And same as the number of physical
+servers,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/53-1
+00:14:21.795 --> 00:14:27.494
+<v Ozzie Diaz>what are the number of physical cores
+that are not the VM hosts machine?</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/53-2
+00:14:27.494 --> 00:14:33.584
+<v Ozzie Diaz>In this example, we don't have any,
+but if we had physical bare metal servers</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/53-3
+00:14:33.584 --> 00:14:37.799
+<v Ozzie Diaz>that were not part of the virtualization
+environment,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/54-0
+00:14:38.199 --> 00:14:43.776
+<v Ozzie Diaz>we would want to account for that as well.
+So then we continue going.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/54-1
+00:14:43.776 --> 00:14:48.158
+<v Ozzie Diaz>So now we have the estimated allocated
+physical cores,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/54-2
+00:14:48.158 --> 00:14:53.973
+<v Ozzie Diaz>including the VM hosts this time,
+very similar to the number of physical</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/54-3
+00:14:53.973 --> 00:14:57.239
+<v Ozzie Diaz>servers above that included the VM hosts.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/55-0
+00:14:57.799 --> 00:15:04.507
+<v Ozzie Diaz>And that guidance note to the business
+analyst is go to the vHost tab and sum up</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/55-1
+00:15:04.507 --> 00:15:08.814
+<v Ozzie Diaz>the number of cores.
+So now we go to the vHost tab,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/55-2
+00:15:08.814 --> 00:15:14.279
+<v Ozzie Diaz>and then we sum up the number of cores,
+and it looks like 11,040.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/56-0
+00:15:17.479 --> 00:15:20.974
+<v Ozzie Diaz>Otherwise,
+there seems to be also a benchmark</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/56-1
+00:15:20.974 --> 00:15:26.671
+<v Ozzie Diaz>assumption formula in there to estimate
+if we did not have the V host tab.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/56-2
+00:15:26.671 --> 00:15:32.140
+<v Ozzie Diaz>We have to be able to adapt to a
+situation where if we don't have the V</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/56-3
+00:15:32.140 --> 00:15:35.558
+<v Ozzie Diaz>host tab,
+then we just have to make the best</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/56-4
+00:15:35.558 --> 00:15:40.039
+<v Ozzie Diaz>possible and ideally as accurate as
+possible of estimation</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/57-0
+00:15:40.359 --> 00:15:45.749
+<v Ozzie Diaz>for values that we can't easily just
+count in a tab. So here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/57-1
+00:15:45.749 --> 00:15:52.790
+<v Ozzie Diaz>allocated virtual memory in gigabytes.
+So this is the guidance is we're going to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/57-2
+00:15:52.790 --> 00:15:58.441
+<v Ozzie Diaz>the V info tab again and sum up the
+memory column. Now remember,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/57-3
+00:15:58.441 --> 00:16:02.439
+<v Ozzie Diaz>the memory is an MIB,
+and then we're going to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/58-0
+00:16:03.399 --> 00:16:11.410
+<v Ozzie Diaz>We're going to then divide that by 1,
+024 to achieve gigabytes.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/58-1
+00:16:11.410 --> 00:16:18.919
+<v Ozzie Diaz>So we go to the V Infra tab,
+and then we go here to memory.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/59-0
+00:16:20.359 --> 00:16:25.159
+<v Ozzie Diaz>And I take that, take that number, and...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/60-0
+00:16:26.279 --> 00:16:27.399
+<v Ozzie Diaz>And enter it in.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/61-0
+00:16:28.599 --> 00:16:30.439
+<v Ozzie Diaz>then divided by 1024.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/62-0
+00:16:33.159 --> 00:16:37.868
+<v Ozzie Diaz>And I have the amount of memory there.
+Then allocated physical memory in</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/62-1
+00:16:37.868 --> 00:16:42.384
+<v Ozzie Diaz>gigabytes, excluding the VM host,
+very similar to what we saw before,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/62-2
+00:16:42.384 --> 00:16:47.221
+<v Ozzie Diaz>because we don't have any bare metal
+servers. In this scenario, it's zero.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/62-3
+00:16:47.221 --> 00:16:52.575
+<v Ozzie Diaz>But now we want to include the physical
+memory in gigabytes of the VM host itself.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/62-4
+00:16:52.575 --> 00:16:54.639
+<v Ozzie Diaz>So we go over to the V-host tab.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/63-0
+00:16:54.999 --> 00:16:56.119
+<v Ozzie Diaz>If we have it.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/64-0
+00:16:57.319 --> 00:17:02.359
+<v Ozzie Diaz>And we go to the memory column,
+then the number memory column.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/65-0
+00:17:03.399 --> 00:17:04.279
+<v Ozzie Diaz>In V. Host.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/66-0
+00:17:05.239 --> 00:17:06.199
+<v Ozzie Diaz>And...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/67-0
+00:17:07.959 --> 00:17:13.079
+<v Ozzie Diaz>And we see, we see the number here. Now,
+remember, that's an MIB, so...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/68-0
+00:17:14.279 --> 00:17:17.977
+<v Ozzie Diaz>I plug that in,
+divided by 1024 for the guidance we</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/68-1
+00:17:17.977 --> 00:17:21.319
+<v Ozzie Diaz>provide to the analyst,
+and then we have that.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/69-0
+00:17:23.079 --> 00:17:25.639
+<v Ozzie Diaz>Oh, they got entered into the wrong place.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/70-0
+00:17:34.439 --> 00:17:39.079
+<v Ozzie Diaz>Okay,
+so and then now we are counting up the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/70-1
+00:17:39.079 --> 00:17:45.367
+<v Ozzie Diaz>total storage. Now, here,
+there are so different people have</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/70-2
+00:17:45.367 --> 00:17:53.924
+<v Ozzie Diaz>different have different philosophies on
+which storage amount they're going to use</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/70-3
+00:17:53.924 --> 00:17:54.439
+<v Ozzie Diaz>here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-0
+00:17:54.759 --> 00:18:00.143
+<v Ozzie Diaz>Even though the guidance the guidance
+says V info V info tab sum up the in use</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-1
+00:18:00.143 --> 00:18:04.436
+<v Ozzie Diaz>MIB, so it's the utilize,
+and that's not a bad idea because at</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-2
+00:18:04.436 --> 00:18:07.435
+<v Ozzie Diaz>least that gives us a better, a more,
+well,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-3
+00:18:07.435 --> 00:18:11.524
+<v Ozzie Diaz>it does it does it gives us gives us a
+it's cost effective,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-4
+00:18:11.524 --> 00:18:16.703
+<v Ozzie Diaz>even though we're building a business,
+we're building this part of the this</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/71-5
+00:18:16.703 --> 00:18:18.679
+<v Ozzie Diaz>portion of the business case.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/72-0
+00:18:18.759 --> 00:18:20.439
+<v Ozzie Diaz>is the on-premise portion.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/73-0
+00:18:21.639 --> 00:18:30.285
+<v Ozzie Diaz>But it doesn't overly inflate the storage
+amounts. But let's look at both values.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/73-1
+00:18:30.285 --> 00:18:37.559
+<v Ozzie Diaz>So if we go to vinfo and then we're
+looking for the storage amounts.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/81-0
+00:19:18.039 --> 00:19:19.319
+<v Ozzie Diaz>It looks like this.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/82-0
+00:19:20.679 --> 00:19:26.283
+<v Ozzie Diaz>This RV tools export does not, ohh,
+because I'm looking in the wrong in the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/82-1
+00:19:26.283 --> 00:19:30.780
+<v Ozzie Diaz>wrong tab again, sorry,
+so I was on I was on the V host tab,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/82-2
+00:19:30.780 --> 00:19:35.425
+<v Ozzie Diaz>that's the wrong tab,
+so I'm looking at the V info tab for the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/82-3
+00:19:35.425 --> 00:19:39.406
+<v Ozzie Diaz>the in use, OK,
+but we're gonna we're gonna get we're</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/82-4
+00:19:39.406 --> 00:19:41.839
+<v Ozzie Diaz>gonna get both the numbers, so...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/83-0
+00:19:43.319 --> 00:19:43.719
+<v Ozzie Diaz>Um...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/84-0
+00:19:48.759 --> 00:19:49.319
+<v Ozzie Diaz>Okay.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/85-0
+00:19:50.919 --> 00:19:55.448
+<v Ozzie Diaz>So we have in this example here,
+we have provisioned MIB,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/85-1
+00:19:55.448 --> 00:20:01.071
+<v Ozzie Diaz>which is basically the disk capacity
+itself, and then in use MIB, well,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/85-2
+00:20:01.071 --> 00:20:07.239
+<v Ozzie Diaz>provisioned MIB at least provisioned by
+the vCenter, by the VMware hypervisor.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/86-0
+00:20:08.199 --> 00:20:12.587
+<v Ozzie Diaz>And then in use MIB being what it's
+actually using.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/86-1
+00:20:12.587 --> 00:20:18.324
+<v Ozzie Diaz>So we sometimes will look at both of
+these figures and then decide,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/86-2
+00:20:18.324 --> 00:20:25.327
+<v Ozzie Diaz>do we want to stick with using the in use
+MIB if there's a significant discrepancy</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/86-3
+00:20:25.327 --> 00:20:29.039
+<v Ozzie Diaz>to provision MIB because they pay for
+that.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/87-0
+00:20:29.119 --> 00:20:35.018
+<v Ozzie Diaz>that storage hardware.
+So we'll just look here and then take the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/87-1
+00:20:35.018 --> 00:20:41.279
+<v Ozzie Diaz>provision MIB or capacity MIB,
+depending on what it might be called.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/89-0
+00:20:42.719 --> 00:20:47.437
+<v Ozzie Diaz>And we'll just, you know, stash that away,
+stash right away right now for</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/89-1
+00:20:47.437 --> 00:20:51.772
+<v Ozzie Diaz>comparison's sake. Again,
+this is the business analyst that's doing</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/89-2
+00:20:51.772 --> 00:20:54.959
+<v Ozzie Diaz>this exercise.
+And then we'll use the in use MIB.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/90-0
+00:20:57.159 --> 00:21:02.257
+<v Ozzie Diaz>And then we'll then we'll put that,
+let's just let's just, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/90-1
+00:21:02.257 --> 00:21:06.394
+<v Ozzie Diaz>put it put it down here,
+or just for comparison's sake,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/90-2
+00:21:06.394 --> 00:21:12.378
+<v Ozzie Diaz>they're very close, so they're very close,
+so you know, in this in this example,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/90-3
+00:21:12.378 --> 00:21:16.515
+<v Ozzie Diaz>because because the variance is so tight,
+is so narrow,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/90-4
+00:21:16.515 --> 00:21:18.879
+<v Ozzie Diaz>I don't think it really matters.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/91-0
+00:21:19.199 --> 00:21:25.400
+<v Ozzie Diaz>Which one we use,
+so let's just use the in the in use MIB</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/91-1
+00:21:25.400 --> 00:21:30.317
+<v Ozzie Diaz>value,
+and then and then we're and then we're</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/91-2
+00:21:30.317 --> 00:21:31.279
+<v Ozzie Diaz>going to.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/92-0
+00:21:32.639 --> 00:21:38.554
+<v Ozzie Diaz>convert, because it's MIB,
+we're going to convert that to gigabytes.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/92-1
+00:21:38.554 --> 00:21:42.582
+<v Ozzie Diaz>So 953.
+67 is at least the guidance conversion</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/92-2
+00:21:42.582 --> 00:21:48.754
+<v Ozzie Diaz>that we have for the analysts here.
+And there we now have in gigabytes,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/92-3
+00:21:48.754 --> 00:21:53.639
+<v Ozzie Diaz>the amount of storage. So in this example,
+we don't have</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/93-0
+00:21:53.999 --> 00:22:00.291
+<v Ozzie Diaz>any backup or disaster recovery spelled
+out, but we want to account for that.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/93-1
+00:22:00.291 --> 00:22:03.679
+<v Ozzie Diaz>So just be aware of that. So now, so here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/94-0
+00:22:13.519 --> 00:22:21.048
+<v Ozzie Diaz>So in this example here, so it looks like,
+well, that's a calculator field,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/94-1
+00:22:21.048 --> 00:22:27.090
+<v Ozzie Diaz>forget it. So, okay,
+the next manual entry that we're making</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/94-2
+00:22:27.090 --> 00:22:32.439
+<v Ozzie Diaz>is the average ratio of VCPU to cores.
+The benchmark.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/95-0
+00:22:32.559 --> 00:22:35.919
+<v Ozzie Diaz>that is built into the model is 1.97.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/96-0
+00:22:36.959 --> 00:22:43.896
+<v Ozzie Diaz>That's a good rule of thumb. Here,
+the guidance for the business analyst,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/96-1
+00:22:43.896 --> 00:22:48.489
+<v Ozzie Diaz>we say,
+go to the vHost tab and grab the average</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/96-2
+00:22:48.489 --> 00:22:55.519
+<v Ozzie Diaz>vCPUs per core from that column there.
+Now, that's if we have a vHost tab.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/97-0
+00:22:55.919 --> 00:23:01.869
+<v Ozzie Diaz>If we don't have a vhost tab, then 1.
+97 is a good enough benchmark to use.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/97-1
+00:23:01.869 --> 00:23:06.879
+<v Ozzie Diaz>So we'll go to vhost and then we'll
+average the vCPUs per core.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/98-0
+00:23:08.399 --> 00:23:10.879
+<v Ozzie Diaz>Column, so...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/99-0
+00:23:20.399 --> 00:23:21.639
+<v Ozzie Diaz>So we look for the...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/100-0
+00:23:23.039 --> 00:23:30.463
+<v Ozzie Diaz>Here we go. So, here's the VCPUs per core,
+and the average shows 1.48. So,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/100-1
+00:23:30.463 --> 00:23:36.996
+<v Ozzie Diaz>in this example, then 1.
+48 is what the customer is running under</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/100-2
+00:23:36.996 --> 00:23:42.241
+<v Ozzie Diaz>now. Now,
+the next one is we want to we want to get.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/100-3
+00:23:42.241 --> 00:23:42.439
+<v Ozzie Diaz>..</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/101-0
+00:23:44.519 --> 00:23:52.192
+<v Ozzie Diaz>to be able to calculate ESUs,
+sometimes we'll get the operating system</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/101-1
+00:23:52.192 --> 00:23:58.677
+<v Ozzie Diaz>being a part of the metadata in the RV
+tools file. So here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/101-2
+00:23:58.677 --> 00:24:02.999
+<v Ozzie Diaz>so we're looking for physical cores with</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/102-0
+00:24:03.119 --> 00:24:07.234
+<v Ozzie Diaz>Windows Server operating system,
+any addition.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/102-1
+00:24:07.234 --> 00:24:14.501
+<v Ozzie Diaz>So the guidance we have here is go to the
+V info tab and then filter the operating</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/102-2
+00:24:14.501 --> 00:24:21.592
+<v Ozzie Diaz>system to Windows Server and then take
+the total number of CPUs and divide it by</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/102-3
+00:24:21.592 --> 00:24:26.319
+<v Ozzie Diaz>the value in,
+divide it by the average ratio of ECPU.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/103-0
+00:24:26.559 --> 00:24:30.389
+<v Ozzie Diaz>per core,
+which we had calculated here as 1.48.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/103-1
+00:24:30.389 --> 00:24:36.691
+<v Ozzie Diaz>Otherwise, the benchmark would be 1.97.
+So let's go to vInfo tab and then look</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/103-2
+00:24:36.691 --> 00:24:40.759
+<v Ozzie Diaz>for operating system Windows Server.
+So now the...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/104-0
+00:24:42.399 --> 00:24:47.279
+<v Ozzie Diaz>We usually have a couple of places to
+find operating system.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/105-0
+00:24:50.959 --> 00:24:57.686
+<v Ozzie Diaz>So, in the V-info tab,
+so we're looking for the operating system</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/105-1
+00:24:57.686 --> 00:25:03.585
+<v Ozzie Diaz>Windows specifically,
+and usually there are two columns,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/105-2
+00:25:03.585 --> 00:25:08.759
+<v Ozzie Diaz>hopefully.
+Sometimes one column is not built out.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/106-0
+00:25:09.639 --> 00:25:17.290
+<v Ozzie Diaz>or filled in with metadata as well as the
+other one. So I usually will default to,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/106-1
+00:25:17.290 --> 00:25:23.650
+<v Ozzie Diaz>if I have a column that says OS according
+to the configuration file,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/106-2
+00:25:23.650 --> 00:25:29.641
+<v Ozzie Diaz>I will choose that one.
+So sometimes we have OS according to the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/106-3
+00:25:29.641 --> 00:25:30.839
+<v Ozzie Diaz>VMware tools.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/108-0
+00:25:31.239 --> 00:25:36.973
+<v Ozzie Diaz>Sometimes that one is not,
+or similarly named one,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/108-1
+00:25:36.973 --> 00:25:43.155
+<v Ozzie Diaz>is not built out as much and may have
+blanks in there.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/108-2
+00:25:43.155 --> 00:25:50.799
+<v Ozzie Diaz>So we'll filter to all of the Windows.
+And now it's Windows Server.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/109-0
+00:25:51.799 --> 00:26:00.309
+<v Ozzie Diaz>Sometimes we'll show Windows 10,
+Windows 7, which are client devices,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/109-1
+00:26:00.309 --> 00:26:10.519
+<v Ozzie Diaz>and that one may throw a little bit of a
+confusion or ambiguity to the ESU picture.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/110-0
+00:26:11.079 --> 00:26:18.519
+<v Ozzie Diaz>In in the in the business case, so.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/111-0
+00:26:19.519 --> 00:26:23.407
+<v Ozzie Diaz>So I like to just pick just the Windows
+Server, so you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/111-1
+00:26:23.407 --> 00:26:27.868
+<v Ozzie Diaz>and it'll actually say Microsoft Windows
+Server, hopefully, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/111-2
+00:26:27.868 --> 00:26:32.839
+<v Ozzie Diaz>it has to at least say Windows Server,
+whether it has Microsoft in it or not,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/111-3
+00:26:32.839 --> 00:26:36.982
+<v Ozzie Diaz>but all the additions.
+If there are additions missing, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/111-4
+00:26:36.982 --> 00:26:40.359
+<v Ozzie Diaz>then that's okay. You know,
+sometimes we'll need to.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/112-0
+00:26:42.039 --> 00:26:48.963
+<v Ozzie Diaz>make assumptions, but here,
+so I've selected all the Windows Server</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/112-1
+00:26:48.963 --> 00:26:54.665
+<v Ozzie Diaz>and then it says go to the CPU column and
+get that sum.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/112-2
+00:26:54.665 --> 00:26:57.719
+<v Ozzie Diaz>So we'll go to the CPU column.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/113-0
+00:27:02.879 --> 00:27:10.039
+<v Ozzie Diaz>number of CPUs and I have a sum of 12,405.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/114-0
+00:27:13.359 --> 00:27:18.790
+<v Ozzie Diaz>And then so,
+so it's basically that divided by the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/114-1
+00:27:18.790 --> 00:27:26.456
+<v Ozzie Diaz>average ratio of eCPU per core value,
+and here I'm just doing that cell</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/114-2
+00:27:26.456 --> 00:27:31.993
+<v Ozzie Diaz>reference,
+and then there it gives us the number of</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/114-3
+00:27:31.993 --> 00:27:35.719
+<v Ozzie Diaz>physical cores with Windows Server.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/115-0
+00:27:36.039 --> 00:27:42.962
+<v Ozzie Diaz>The next one is physical,
+so that calculation we just made there is</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/115-1
+00:27:42.962 --> 00:27:47.543
+<v Ozzie Diaz>for demonstrating Azure hybrid use
+benefits.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/115-2
+00:27:47.543 --> 00:27:55.483
+<v Ozzie Diaz>Bring your Windows Server license to
+Azure and you can enjoy Azure hybrid use</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/115-3
+00:27:55.483 --> 00:27:56.399
+<v Ozzie Diaz>benefits.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/116-0
+00:27:56.839 --> 00:28:04.502
+<v Ozzie Diaz>and cost reduction on those licenses that
+you that you own, bringing them over.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/116-1
+00:28:04.502 --> 00:28:12.068
+<v Ozzie Diaz>So the next one is ESUs for supported
+versions of the Windows Server editions.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/116-2
+00:28:12.068 --> 00:28:17.719
+<v Ozzie Diaz>So if we go if we go back over here to
+the Windows Server.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/117-0
+00:28:19.319 --> 00:28:19.959
+<v Ozzie Diaz>And...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/118-0
+00:28:23.159 --> 00:28:30.549
+<v Ozzie Diaz>And you'll have to make the right
+adaptations in the code for the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/118-1
+00:28:30.549 --> 00:28:39.057
+<v Ozzie Diaz>refactoring in terms of what are the
+Windows Server editions that are under</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/118-2
+00:28:39.057 --> 00:28:44.319
+<v Ozzie Diaz>ESU. As far as I know,
+it's only Windows 2012.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/119-0
+00:28:44.599 --> 00:28:48.258
+<v Ozzie Diaz>At this time.
+So this is not intended to be</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/119-1
+00:28:48.258 --> 00:28:53.662
+<v Ozzie Diaz>prescriptive. At this time,
+I'm only aware of Windows 2012 being</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/119-2
+00:28:53.662 --> 00:28:58.318
+<v Ozzie Diaz>under ESU support.
+So you'll have to know this when the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/119-3
+00:28:58.318 --> 00:29:03.639
+<v Ozzie Diaz>calculations are being done and codify
+that in the refactoring.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/120-0
+00:29:04.199 --> 00:29:09.742
+<v Ozzie Diaz>So I have in this example,
+Windows Server 2012 selected,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/120-1
+00:29:09.742 --> 00:29:16.839
+<v Ozzie Diaz>and then we go back over here to number
+of CPUs, and then we enter that.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/121-0
+00:29:19.959 --> 00:29:25.719
+<v Ozzie Diaz>Enter that and again divide by the
+average ratio of ECPU to core value.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/122-0
+00:29:27.839 --> 00:29:37.760
+<v Ozzie Diaz>And we have the number of physical cores
+with versions supported under ESU still.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/122-1
+00:29:37.760 --> 00:29:47.439
+<v Ozzie Diaz>And now we make certain assumptions on
+SQL Server licenses. We don't always see</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/123-0
+00:29:47.959 --> 00:29:54.657
+<v Ozzie Diaz>the SQL Server metadata in the RV tools.
+In fact, we rarely see it.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/123-1
+00:29:54.657 --> 00:29:59.188
+<v Ozzie Diaz>So we just make an assumption here that,
+hey,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/123-2
+00:29:59.188 --> 00:30:06.870
+<v Ozzie Diaz>let's assume that 10% of the number of
+physical cores with any Windows Server</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/123-3
+00:30:06.870 --> 00:30:07.559
+<v Ozzie Diaz>version</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/124-0
+00:30:07.799 --> 00:30:15.040
+<v Ozzie Diaz>on it also is running SQL Server licenses.
+And then for the ESU supported one,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/124-1
+00:30:15.040 --> 00:30:19.348
+<v Ozzie Diaz>same thing,
+10% of the physical cores with ESU</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/124-2
+00:30:19.348 --> 00:30:26.039
+<v Ozzie Diaz>supported versions of Windows Server,
+we assume are running SQL as well.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/125-0
+00:30:27.719 --> 00:30:33.901
+<v Ozzie Diaz>So that's it in terms of the client
+variable entries.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/125-1
+00:30:33.901 --> 00:30:42.717
+<v Ozzie Diaz>And then now we go into to start filling
+in the future state Azure scenario.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/125-2
+00:30:42.717 --> 00:30:47.639
+<v Ozzie Diaz>And so I'll basically take the ACR
+numbers</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/126-0
+00:30:47.879 --> 00:30:56.073
+<v Ozzie Diaz>That I that I calculated annual to to
+create a basically a ten-year annual ACR</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/126-1
+00:30:56.073 --> 00:31:00.741
+<v Ozzie Diaz>view,
+and so so here we have for the for the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/126-2
+00:31:00.741 --> 00:31:08.519
+<v Ozzie Diaz>compute for the virtual machines,
+and it's and I'm just using the example.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/127-0
+00:31:08.559 --> 00:31:12.779
+<v Ozzie Diaz>pay go right now.
+You should be able to illustrate and</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/127-1
+00:31:12.779 --> 00:31:18.763
+<v Ozzie Diaz>render all of the different pricing
+offers and then show that on a dashboard.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/127-2
+00:31:18.763 --> 00:31:24.439
+<v Ozzie Diaz>So I'm just going to use the pay go right
+now and then plug that in here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/128-0
+00:31:30.039 --> 00:31:32.279
+<v Ozzie Diaz>Look that value in here as an annual.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/129-0
+00:31:33.159 --> 00:31:34.759
+<v Ozzie Diaz>As an annual value.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/132-0
+00:31:49.239 --> 00:31:56.619
+<v Ozzie Diaz>So, we, we, we,
+we count for the the compute ACR and then</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/132-1
+00:31:56.619 --> 00:31:59.799
+<v Ozzie Diaz>also for the storage ACR.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/133-0
+00:32:02.119 --> 00:32:02.679
+<v Ozzie Diaz>Annual.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/134-0
+00:32:08.279 --> 00:32:15.108
+<v Ozzie Diaz>So both of these numbers here are the
+pay-as-you-go versions, pricing offers.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/134-1
+00:32:15.108 --> 00:32:21.149
+<v Ozzie Diaz>If we had a backup software,
+then we would want to include backup as</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/134-2
+00:32:21.149 --> 00:32:26.839
+<v Ozzie Diaz>well. That should be an option.
+That should be an optional flag.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/135-0
+00:32:27.759 --> 00:32:33.461
+<v Ozzie Diaz>You know, HADR, same thing.
+That should be an option. So,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/135-1
+00:32:33.461 --> 00:32:41.129
+<v Ozzie Diaz>so then basically now this is this is the
+end for the human business analyst.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/135-2
+00:32:41.129 --> 00:32:45.553
+<v Ozzie Diaz>This is the end of the data input steps.
+So,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/135-3
+00:32:45.553 --> 00:32:50.959
+<v Ozzie Diaz>so you see here these these these summary
+graphs here.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/136-0
+00:32:51.559 --> 00:32:58.339
+<v Ozzie Diaz>And the summary tables. Now, one thing,
+one thing also to show is,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/136-1
+00:32:58.339 --> 00:33:04.107
+<v Ozzie Diaz>is we we put in,
+so this is Azure virtual machines going</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/136-2
+00:33:04.107 --> 00:33:09.672
+<v Ozzie Diaz>to base going,
+so on-premise virtual machines going to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/136-3
+00:33:09.672 --> 00:33:10.279
+<v Ozzie Diaz>Azure.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/137-0
+00:33:10.519 --> 00:33:13.811
+<v Ozzie Diaz>virtual machines or infrastructure as a
+service.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/137-1
+00:33:13.811 --> 00:33:16.900
+<v Ozzie Diaz>So we make an assumption of a migration
+cost,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/137-2
+00:33:16.900 --> 00:33:20.393
+<v Ozzie Diaz>because we do want to account for a
+migration cost,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/137-3
+00:33:20.393 --> 00:33:25.431
+<v Ozzie Diaz>because that could end up requiring ESIF
+and other Microsoft incentives to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/137-4
+00:33:25.431 --> 00:33:30.199
+<v Ozzie Diaz>subsidize, you know, for the customer.
+And the assumption that we have</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/138-0
+00:33:30.599 --> 00:33:36.833
+<v Ozzie Diaz>as a reference benchmark is 1500 US
+dollars per VM. So you see that,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/138-1
+00:33:36.833 --> 00:33:41.893
+<v Ozzie Diaz>so you see that that's entered here in
+this field here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/138-2
+00:33:41.893 --> 00:33:49.120
+<v Ozzie Diaz>and then that goes into calculating the
+overall migration cost for the scope of</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/138-3
+00:33:49.120 --> 00:33:51.559
+<v Ozzie Diaz>VMs that we saw here, 2831.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/140-0
+00:33:52.439 --> 00:33:59.083
+<v Ozzie Diaz>And then the it looks like the ramp that
+that is currently configured in here is</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/140-1
+00:33:59.083 --> 00:34:02.692
+<v Ozzie Diaz>roughly A 24 month ramp to a two year
+ramp.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/140-2
+00:34:02.692 --> 00:34:08.597
+<v Ozzie Diaz>That's why that's why you see migration
+costs here over multiple years.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/140-3
+00:34:08.597 --> 00:34:11.959
+<v Ozzie Diaz>Now you know we can we can we can change.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/141-0
+00:34:12.359 --> 00:34:16.887
+<v Ozzie Diaz>We can change that just for illustration
+purposes,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/141-1
+00:34:16.887 --> 00:34:23.810
+<v Ozzie Diaz>that we want to see all the VMs migrated
+within one year, and then, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/141-2
+00:34:23.810 --> 00:34:29.048
+<v Ozzie Diaz>then the migration cost is just spread
+out over, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/141-3
+00:34:29.048 --> 00:34:31.799
+<v Ozzie Diaz>this period of time here, so...</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/142-0
+00:34:33.079 --> 00:34:33.359
+<v Ozzie Diaz>The.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/143-0
+00:34:35.199 --> 00:34:40.979
+<v Ozzie Diaz>The graphics basically show a 10-year or
+five-year,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/143-1
+00:34:40.979 --> 00:34:47.313
+<v Ozzie Diaz>and we want to be able to have both,
+cash flow analysis.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/143-2
+00:34:47.313 --> 00:34:54.759
+<v Ozzie Diaz>So these graphs are related to the cash
+flow, and we want to show.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/144-0
+00:34:55.079 --> 00:35:00.549
+<v Ozzie Diaz>the ROI.
+We want to show the net savings to be</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/144-1
+00:35:00.549 --> 00:35:07.300
+<v Ozzie Diaz>very explicit what the savings are.
+In this example here,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/144-2
+00:35:07.300 --> 00:35:15.679
+<v Ozzie Diaz>we see that over a 10-year period,
+it's negative 4%. So that's actually</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/145-0
+00:35:15.959 --> 00:35:20.909
+<v Ozzie Diaz>a savings over the 10 years,
+but probably because of the migration</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/145-1
+00:35:20.909 --> 00:35:27.115
+<v Ozzie Diaz>cost over just a five-year time horizon,
+it's a positive 3%. So it's not a savings.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/145-2
+00:35:27.115 --> 00:35:29.479
+<v Ozzie Diaz>It's not an ROI in this example.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/146-0
+00:35:31.879 --> 00:35:34.865
+<v Ozzie Diaz>And, and,
+and then we also we also need to</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/146-1
+00:35:34.865 --> 00:35:35.559
+<v Ozzie Diaz>calculate.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/147-0
+00:35:36.839 --> 00:35:42.202
+<v Ozzie Diaz>other summary financials as well.
+So net present value,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/147-1
+00:35:42.202 --> 00:35:50.151
+<v Ozzie Diaz>we need to have that. The payback period,
+the payback period is basically how many</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/147-2
+00:35:50.151 --> 00:35:56.279
+<v Ozzie Diaz>years will it take to pay back dual run
+costs, migration costs,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/148-0
+00:35:56.839 --> 00:36:00.138
+<v Ozzie Diaz>And of course,
+once they start realizing savings,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/148-1
+00:36:00.138 --> 00:36:05.679
+<v Ozzie Diaz>how long will it take to accumulate those
+savings to make up for the dual run costs</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/148-2
+00:36:05.679 --> 00:36:10.627
+<v Ozzie Diaz>and the migration costs that are built
+into the business case here? Again,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/148-3
+00:36:10.627 --> 00:36:14.519
+<v Ozzie Diaz>this is retail.
+We're not assuming any ESIF at this point.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/149-0
+00:36:16.279 --> 00:36:21.556
+<v Ozzie Diaz>So, so then, you know,
+we want to also calculate the ROI,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/149-1
+00:36:21.556 --> 00:36:27.288
+<v Ozzie Diaz>the net present value over both the
+five-year and the 10-year,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/149-2
+00:36:27.288 --> 00:36:34.657
+<v Ozzie Diaz>and we want a total cost of ownership.
+We want the total cost of ownership shown</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/149-3
+00:36:34.657 --> 00:36:34.839
+<v Ozzie Diaz>as</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/150-0
+00:36:34.919 --> 00:36:38.859
+<v Ozzie Diaz>cash flow.
+And that's what that's what this these</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/150-1
+00:36:38.859 --> 00:36:45.635
+<v Ozzie Diaz>graphs tell us here. And that's basically,
+you know, what these what these, you know,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/150-2
+00:36:45.635 --> 00:36:52.175
+<v Ozzie Diaz>tables do here as well over the 10 year,
+or I could just take the first five years</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/150-3
+00:36:52.175 --> 00:36:55.799
+<v Ozzie Diaz>as well.
+But across all the major categories,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/151-0
+00:36:55.959 --> 00:37:00.839
+<v Ozzie Diaz>of CAPEX and OPEX, right?
+We see server acquisition, major category,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/151-1
+00:37:00.839 --> 00:37:05.435
+<v Ozzie Diaz>storage and network acquisition,
+and that includes depreciation,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/151-2
+00:37:05.435 --> 00:37:10.950
+<v Ozzie Diaz>hardware maintenance, backup and DR,
+which we don't have that in this example</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/151-3
+00:37:10.950 --> 00:37:14.839
+<v Ozzie Diaz>case, data center facilities,
+virtualization software,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/152-0
+00:37:15.079 --> 00:37:19.644
+<v Ozzie Diaz>Windows and SQL Server licenses,
+Windows and SQL Server ESU,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/152-1
+00:37:19.644 --> 00:37:25.255
+<v Ozzie Diaz>IT operations costs, basically admins,
+and because this is the this is the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/152-2
+00:37:25.255 --> 00:37:31.166
+<v Ozzie Diaz>before state or the on-premise state,
+there is no migration services cost that</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/152-3
+00:37:31.166 --> 00:37:34.159
+<v Ozzie Diaz>shows up down here in the future states.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/153-0
+00:37:34.999 --> 00:37:42.939
+<v Ozzie Diaz>proposed Azure migration.
+So we also classify CapEx and OpEx as</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/153-1
+00:37:42.939 --> 00:37:43.559
+<v Ozzie Diaz>well.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/154-0
+00:37:49.239 --> 00:37:54.384
+<v Ozzie Diaz>If we're able to show,
+visualize a waterfall chart to show the</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/154-1
+00:37:54.384 --> 00:37:59.938
+<v Ozzie Diaz>benefits and the savings across the
+various value and cost drivers,</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/154-2
+00:37:59.938 --> 00:38:04.674
+<v Ozzie Diaz>that would be ideal as well from a
+rendering perspective.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/154-3
+00:38:04.674 --> 00:38:08.839
+<v Ozzie Diaz>So this completes the entire application
+workflow.</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/155-0
+00:38:09.879 --> 00:38:14.393
+<v Ozzie Diaz>And, but in particular,
+the layer 3 financial and business case</v>
+
+176d44da-206d-477f-aeb8-8f04572cb8fb/155-1
+00:38:14.393 --> 00:38:15.239
+<v Ozzie Diaz>development.</v>

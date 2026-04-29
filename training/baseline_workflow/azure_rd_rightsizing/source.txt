@@ -1,0 +1,12 @@
+Source PDF: VMWare / OnPrem to Azure Mappings (AI Assistant Copilot)
+Origin    : Microsoft Azure R&D, shared by colleague 2026-04-27
+Pages     : 11
+
+The PDF was attached to a chat message rather than committed to the repo.
+The slide content is captured verbatim in `canonical_formulas.md` in this
+directory and is the authoritative reference for Layer 2 rule entries.
+
+If a newer revision of the PDF is shared:
+  1. Save the new PDF here as `canonical_formulas_<YYYY-MM-DD>.pdf`.
+  2. Update `canonical_formulas.md` with any changed formulas.
+  3. Bump the rule entries that cite changed anchors.

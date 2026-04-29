@@ -1,0 +1,10 @@
+Source video (not committed — too large for the repo's binary policy):
+
+  ~/Downloads/BV Biz Case Training/Layer 1 - Data file ingest and adaptation-20260423_132626-Meeting Recording.mp4
+
+Size: ~51 MB
+Length: ~12 minutes
+Recorded: 2026-04-23
+
+To watch from the cited timestamp in `../ba_rules/layer1.yaml`, open the file
+above in any video player and seek to the timestamp on the rule.

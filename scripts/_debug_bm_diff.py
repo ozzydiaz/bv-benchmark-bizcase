@@ -6,7 +6,7 @@ from engine.models import BenchmarkConfig
 import openpyxl, dataclasses
 
 wb = openpyxl.load_workbook(
-    "Reliance_BV Benchmark Business Case v6.xlsm", keep_vba=True, data_only=True
+    "<reference-workbook.xlsm>", keep_vba=True, data_only=True
 )
 fc_in = build_inputs_from_workbook(wb)
 val_in = val_inputs()

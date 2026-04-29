@@ -1,4 +1,4 @@
-# UHHS sample
+# Customer A sample
 ## Inventory:
 Number of VM is off: 2831 actual vs. 2661 in app
 Looks like the logic looks at Powered on VMs only for total count

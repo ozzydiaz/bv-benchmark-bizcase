@@ -10,7 +10,7 @@ Three modes
    Catches upstream parser/pricing bugs BEFORE they reach the financial model:
    zero Azure compute cost (broken pricing cache), zero storage (wrong storage
    source), wrong VM counts (bad TCO scope), anomaly SKU matches, etc.
-   These are the bugs that were silently producing wrong UHHS numbers.
+   These are the bugs that were silently producing wrong Customer A numbers.
 
 2. Engine-only sanity check (no workbook required)
    Runs a battery of self-consistency checks directly against the engine
@@ -43,7 +43,7 @@ def _fmt(v: float) -> str:
 def _pipeline_health_checks(inputs: "BusinessCaseInputs") -> list[dict[str, str]]:
     """
     Checks that catch upstream parser and pricing bugs BEFORE they reach the
-    financial model.  These are the exact failure modes observed in the UHHS
+    financial model.  These are the exact failure modes observed in the Customer A
     diagnostic (C1 $0 compute, C2/C3 wrong storage, H1/H2 wrong scope, M1/M4
     anomaly VMs, H4 vcpu/core ratio).
 

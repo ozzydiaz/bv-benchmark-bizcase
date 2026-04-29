@@ -4,7 +4,7 @@ Ran terminal command:  find /Users/ozdiaz/dev/bv-benchmark-bizcase -maxdepth 1 -
 
 Read skill [bv-benchmark-diagnostic](file:///Users/ozdiaz/dev/bv-benchmark-bizcase/.github/skills/bv-benchmark-diagnostic/SKILL.md?vscodeLinkType%3Dskill#1-1), lines 1 to 50
 
-New file found: `UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx`. Running the full diagnostic now. 
+New file found: `<customer-rvtools.xlsx>`. Running the full diagnostic now. 
 
 Created 5 todos
 
@@ -12,7 +12,7 @@ Ran terminal command:  cd /Users/ozdiaz/dev/bv-benchmark-bizcase && source .venv
 import openpyxl
 from pathlib import Path
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
+path = '<customer-rvtools.xlsx>'
 print(f'File size: {Path(path).stat().st_size / 1024:.0f} KB')
 wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
 print(f'Sheet names ({len(wb.sheetnames)}):', wb.sheetnames)
@@ -40,7 +40,7 @@ Ran terminal command:  cd /Users/ozdiaz/dev/bv-benchmark-bizcase && source .venv
 import openpyxl
 from collections import Counter
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
+path = '<customer-rvtools.xlsx>'
 wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
 
 # ── vInfo deep inspection ──
@@ -115,7 +115,7 @@ import openpyxl
 from collections import Counter
 import re
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
+path = '<customer-rvtools.xlsx>'
 wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
 
 # ── vHost ──
@@ -202,8 +202,8 @@ logging.basicConfig(level=logging.WARNING)
 from engine.rvtools_to_inputs import build_business_case
 from pathlib import Path
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
-result = build_business_case(path, client_name='UHHS', currency='USD', ramp_preset='Extended (100% by Y3)')
+path = '<customer-rvtools.xlsx>'
+result = build_business_case(path, client_name='Customer-A', currency='USD', ramp_preset='Extended (100% by Y3)')
 inv = result.inventory
 
 print('=== PIPELINE OUTPUT ===')
@@ -292,8 +292,8 @@ logging.basicConfig(level=logging.WARNING)
 warnings.filterwarnings('ignore')
 from engine.rvtools_to_inputs import build_business_case
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
-result = build_business_case(path, client_name='UHHS', currency='USD', ramp_preset='Extended (100% by Y3)')
+path = '<customer-rvtools.xlsx>'
+result = build_business_case(path, client_name='Customer-A', currency='USD', ramp_preset='Extended (100% by Y3)')
 inv = result.inventory
 rv  = result.rightsizing_validation
 cp  = result.plan
@@ -372,7 +372,7 @@ Ran terminal command:  cd /Users/ozdiaz/dev/bv-benchmark-bizcase && source .venv
 import openpyxl, re
 from collections import Counter
 
-path = 'UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx'
+path = '<customer-rvtools.xlsx>'
 wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
 
 # ── VM name comparison across tabs ──
@@ -439,7 +439,7 @@ Starting: *Propose 3 scenarios & comparison* (5/5)
 
 ---
 
-## Diagnostic Report — `UHHS_RVTools_export_all_2024-10-29 test ozzie.xlsx`
+## Diagnostic Report — `<customer-rvtools.xlsx>`
 
 ### Codebase State
 
@@ -458,7 +458,7 @@ Starting: *Propose 3 scenarios & comparison* (5/5)
 | `Application` column | **Absent** — SQL detection cannot use Application keyword |
 | `Environment` column | Present (col 87) — all values are **backup job labels**, not lifecycle env tags |
 | vCenter | `10.51.160.102` (IP only, no FQDN — no TLD signal) |
-| Source org | UHHS (large US healthcare system, Cleveland area) |
+| Source org | Customer A (large US enterprise) |
 
 ---
 
@@ -498,7 +498,7 @@ Starting: *Propose 3 scenarios & comparison* (5/5)
 | 1 | 🔴 CRITICAL | **Zero per-VM telemetry** — `telemetry_vm_count=0` despite 3,114 rows in vCPU tab | vInfo VM names are **100% obfuscated** as `vm100`, `vm1000`, etc. vCPU/vMemory tabs retain **real hostnames** (e.g. `ACECERPUBLKB1`). Name overlap: **0 of 2,661 VMs matched**. Parser silently falls through to host-proxy for all VMs. |
 | 2 | 🔴 HIGH | **Azure vCPU inflation +25.4%** — 18,344 vs 14,628 on-prem; `vcpu_increased=True`; **641 anomaly VMs (24%)** | Direct consequence of Error 1. Host-proxy utilization is coarse (whole-host %). Memory-heavy VMs (16–96 GiB/2–4 vCPU) that are correctly CPU-idle but memory-loaded snap to large E-series SKUs. Source-ceiling cap (v1.2.3) bounds individual VM vCPU but memory target still drives SKU tier selection upward. |
 | 3 | 🔴 HIGH | **Azure memory inflation +61.3%** — 109,641 GiB vs 67,989 GiB on-prem | Same root cause as #2. Anomaly SKU examples: 2 vCPU, 64+ GiB source → E16s (16 vCPU, 128 GiB) — smallest SKU that fits the memory target. |
-| 4 | 🟡 MEDIUM | **Region fallback to `eastus2`** with no geographic evidence | GMT offset = 0 for all 280 hosts (vCenter UTC-configured — correctly excluded since v1.2.0). vCenter FQDN = IP address (no TLD). Domains: `.com`/`.org` (generic). Datacenter names: `Samaritan`, `UC Production`, `UCRC Production`, `EPIC`, `INVOLTA` — none match Azure region keywords. Region is plausible (UHHS is US-based) but not validated. |
+| 4 | 🟡 MEDIUM | **Region fallback to `eastus2`** with no geographic evidence | GMT offset = 0 for all 280 hosts (vCenter UTC-configured — correctly excluded since v1.2.0). vCenter FQDN = IP address (no TLD). Domains: `.com`/`.org` (generic). Datacenter names: `<tertiary-datacenter>`, `<secondary-datacenter>`, `<primary-datacenter>`, `<secondary-datacenter>`, `<colo-datacenter>` — none match Azure region keywords. Region is plausible (Customer A is US-based) but not validated. |
 | 5 | 🟡 MEDIUM | **False env-tagging signal** — `env_tagging_present=True` but all 1,785 tagged VMs carry backup job labels (`Backups`, `Backup_CLE_ENT01, Backups`) | The `Environment` column is populated by the Dell EMC Avamar backup agent, not by admin lifecycle tagging. Engine treats `env_tagging_present=True` as signal of real tagging quality. `sql_prod_assumed=False` masking the fact that SQL classification is entirely unknown. 1,785 backup appliance VMs are sized as regular IaaS workloads. |
 | 6 | 🟡 MEDIUM | **SQL detection falls to 10% Windows default** — `sql_vms_detected=0`, `sql_detection_source=default` | No `Application` column. No "sql server" string in OS col (`Other 3.x Linux` etc.). All VM names are `vm*` (obfuscated) so name-keyword matching is impossible. Healthcare systems typically have substantial SQL Server footprints; default 10% may be a significant undercount. |
 | 7 | 🟢 LOW | **vCPU/pCore ratio discrepancy** — vHost actual 1.516 vs benchmark 1.97 used in engine | Engine defaults to 1.97 (benchmark). The actual ratio is 23% lower. pCore-derived license metrics (Windows, SQL) are underestimated by the same fraction. `vcpu_ratio_vhost=1.5164` available in PipelineResult but not applied by default. |

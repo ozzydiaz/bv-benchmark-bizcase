@@ -1,7 +1,7 @@
 """Probe the filled reference workbook output cells."""
 import openpyxl
 wb = openpyxl.load_workbook(
-    "Reliance_BV Benchmark Business Case v6.xlsm", keep_vba=True, data_only=True
+    "<reference-workbook.xlsm>", keep_vba=True, data_only=True
 )
 
 sfc = wb["Summary Financial Case"]

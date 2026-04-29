@@ -220,6 +220,15 @@ class RVToolsInventory:
     # 0.0 when vPartition tab is absent.
     total_partition_capacity_gb: float = 0.0      # powered-on VMs only
 
+    # ── ON-PREM TCO STORAGE (canonical, per L1.STORAGE_PROV.001) ──
+    # Source preference (BA-clarified 2026-04-27):
+    #   1. vPartition Capacity MiB summed across ALL rows (canonical when present)
+    #   2. vInfo Provisioned MiB summed per-VM (fallback when vPartition absent)
+    # `storage_provisioned_source` records which source produced the total
+    # ('vpartition' | 'vinfo' | '' when both unavailable).
+    total_storage_provisioned_gb: float = 0.0
+    storage_provisioned_source: str = ""
+
     # ── UTILISATION TELEMETRY (from vCPU and vMemory tabs) ──
     # Values are fleet P95 fractions (0–1+); 0.0 = telemetry not available.
     # powered-on VMs only; powered-off VMs (Overall==0) are excluded.
@@ -530,20 +539,20 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         # Per-host geographic signals: {host_fqdn: {dc, domain, gmt}}
         host_region_signals: dict[str, dict] = {}
 
-        # Build set of host names that have at least one powered-on VM assigned.
-        # Hosts with zero VMs (e.g. empty EPIC-RDB cluster nodes) are excluded
-        # from num_hosts to match the BA's physical host count.
-        _hosts_with_vms: set[str] = {
-            vm.host_name for vm in _vm_records_on if vm.host_name
-        }
+        # Per L1.HOST.002 (BA-clarified 2026-04-27): count ALL hosts in vHost.
+        # The customer paid for every host in the file; if any are out of scope,
+        # the customer/BA removes those rows upstream before sending the file.
+        # The earlier '_hosts_with_vms' cross-match (v1.3.0 H3) under-counts when
+        # vInfo Host names differ from vHost names (FQDN drift, redaction, etc.)
+        # and was reverted per the BA training corpus.
 
         for row2 in rows2:
             if ci_host is not None and row2[ci_host] is None:
                 continue
             host_fqdn = str(row2[ci_host]).strip() if ci_host is not None else ""
 
-            # Only count hosts that have at least one powered-on VM assigned
-            if host_fqdn in _hosts_with_vms:
+            # Count every vHost row that has a host name.
+            if host_fqdn:
                 num_hosts += 1
 
             cores = row2[ci_cores] if ci_cores is not None else None
@@ -872,11 +881,17 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         )
 
     # ------------------------------------------------------------------
-    # vPartition tab — per-VM filesystem storage
-    # 'Capacity MiB' = provisioned filesystem capacity → primary source for
-    # Azure storage sizing (matches BA methodology).
-    # 'Consumed MiB' = in-use bytes → retained for on-prem reporting only.
-    # Both use MIB_TO_GB (÷ 953.67) to produce decimal GB matching the BA.
+    # vPartition tab — per-VM filesystem storage AND canonical TCO total
+    # Per L1.STORAGE_PROV.001 + L1.PARTITION.001 (BA-clarified 2026-04-27):
+    #   - Sum vPartition Capacity (across ALL rows, not just powered-on) is the
+    #     canonical on-prem TCO storage when vPartition is present and usable.
+    #   - Per-VM Capacity is also written to VMRecord.partition_capacity_gb
+    #     (powered-on, joinable VMs only) for Layer 2 disk sizing.
+    #   - 'Consumed MiB' = in-use bytes — retained for on-prem reporting only.
+    #
+    # Edge case: if vInfo VM names are redacted while vPartition retains real
+    # server names, the per-VM join fails but the canonical TCO total still
+    # holds. The total_storage_provisioned_gb field captures that correctly.
     # ------------------------------------------------------------------
     if "vPartition" in wb.sheetnames:
         ws_part = wb["vPartition"]
@@ -884,32 +899,43 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
         hp = list(next(rp))
         ci_pvm  = _col_index(hp, "VM",            [])
         ci_ppow = _col_index(hp, "Powerstate",    [])
-        ci_pcap = _col_index(hp, "Capacity MiB",  [])   # provisioned filesystem GB
-        ci_pcon = _col_index(hp, "Consumed MiB",  [])   # in-use GiB (reporting only)
-        part_capacity: dict[str, float] = {}   # GB (decimal)
-        part_consumed: dict[str, float] = {}   # GiB (binary, legacy)
+        ci_pcap = _col_index(hp, "Capacity MiB",  [])   # provisioned filesystem
+        ci_pcon = _col_index(hp, "Consumed MiB",  [])   # in-use (reporting only)
+        part_capacity: dict[str, float] = {}            # GB (decimal) per VM
+        part_consumed: dict[str, float] = {}            # GiB (binary) per VM
+        total_part_cap_gb_all = 0.0                     # canonical TCO sum (ALL rows)
         for row in rp:
+            cap = row[ci_pcap] if ci_pcap is not None else None
+            con = row[ci_pcon] if ci_pcon is not None else None
+            # Always accumulate the canonical TCO sum, regardless of powerstate.
+            if isinstance(cap, (int, float)) and cap > 0:
+                total_part_cap_gb_all += float(cap) * MIB_TO_GB
+            # Per-VM aggregation only for powered-on rows (matches Layer 2 scope).
             if ci_ppow is not None and str(row[ci_ppow] or "").lower() != "poweredon":
                 continue
             vm_n = str(row[ci_pvm] or "") if ci_pvm is not None else ""
             if not vm_n:
                 continue
-            cap = row[ci_pcap] if ci_pcap is not None else None
-            con = row[ci_pcon] if ci_pcon is not None else None
             if isinstance(cap, (int, float)) and cap > 0:
                 part_capacity[vm_n] = part_capacity.get(vm_n, 0.0) + float(cap) * MIB_TO_GB
             if isinstance(con, (int, float)) and con > 0:
                 part_consumed[vm_n] = part_consumed.get(vm_n, 0.0) + float(con) * MIB_TO_GIB
 
+        # Canonical TCO total — vPartition (preferred when present and non-zero)
+        if total_part_cap_gb_all > 0:
+            inv.total_storage_provisioned_gb = round(total_part_cap_gb_all, 2)
+            inv.storage_provisioned_source = "vpartition"
+
         if part_capacity:
             inv.total_partition_capacity_gb = round(sum(part_capacity.values()), 2)
-            # Populate VMRecord.partition_capacity_gb
+            # Populate VMRecord.partition_capacity_gb (per-VM, powered-on only)
             for vm_rec in inv.vm_records:
                 if vm_rec.name in part_capacity:
                     vm_rec.partition_capacity_gb = round(part_capacity[vm_rec.name], 4)
             _log.debug(
-                f"[rvtools_parser] vPartition capacity: {len(part_capacity):,} VMs, "
-                f"total {inv.total_partition_capacity_gb:,.0f} GB"
+                f"[rvtools_parser] vPartition capacity: {len(part_capacity):,} VMs joined, "
+                f"powered-on subtotal {inv.total_partition_capacity_gb:,.0f} GB; "
+                f"canonical TCO total (all rows) {inv.total_storage_provisioned_gb:,.0f} GB"
             )
         if part_consumed:
             inv.vm_partition_consumed_gib = {k: round(v, 4) for k, v in part_consumed.items()}
@@ -920,6 +946,25 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
             _log.debug(
                 f"[rvtools_parser] vPartition consumed: {len(part_consumed):,} VMs, "
                 f"total {sum(part_consumed.values()):,.0f} GiB"
+            )
+
+    # vInfo Provisioned fallback for the canonical TCO total when vPartition
+    # is absent or empty (per L1.STORAGE_PROV.001 source preference order).
+    if inv.total_storage_provisioned_gb == 0.0:
+        # Sum per-VM provisioned_gib (already populated from vInfo Provisioned MiB)
+        # Note: provisioned_gib is GiB (binary); convert to decimal GB for parity
+        # with the BA's MIB_TO_GB convention.
+        vinfo_prov_gib_total = sum(getattr(vm, "provisioned_gib", 0.0) for vm in inv.vm_records)
+        if vinfo_prov_gib_total > 0:
+            # vm.provisioned_gib was MiB / 1024. Convert back to MiB then to decimal GB.
+            # Equivalent to multiplying by 1024 / 953.674 = 1.0738.
+            inv.total_storage_provisioned_gb = round(
+                vinfo_prov_gib_total * 1024.0 * MIB_TO_GB, 2
+            )
+            inv.storage_provisioned_source = "vinfo"
+            _log.debug(
+                f"[rvtools_parser] Storage TCO source: vInfo Provisioned fallback "
+                f"(vPartition absent/empty) — {inv.total_storage_provisioned_gb:,.0f} GB"
             )
 
     # ------------------------------------------------------------------

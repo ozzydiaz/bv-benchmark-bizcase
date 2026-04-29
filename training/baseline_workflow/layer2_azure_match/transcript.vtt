@@ -1,0 +1,1062 @@
+WEBVTT
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/5-0
+00:00:03.396 --> 00:00:06.596
+<v Ozzie Diaz>Training data and transcript for.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/9-0
+00:00:07.956 --> 00:00:14.697
+<v Ozzie Diaz>updating and potentially refactoring the
+layer 2 portion of the business value</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/9-1
+00:00:14.697 --> 00:00:16.916
+<v Ozzie Diaz>business case development.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/14-0
+00:00:18.436 --> 00:00:23.585
+<v Ozzie Diaz>So now that we have an RV tools file from
+here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/14-1
+00:00:23.585 --> 00:00:31.416
+<v Ozzie Diaz>we actually now need to start doing the
+mapping of each virtual machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/14-2
+00:00:31.416 --> 00:00:37.316
+<v Ozzie Diaz>In this case now,
+because we're talking about building</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/19-0
+00:00:37.636 --> 00:00:42.436
+<v Ozzie Diaz>an Azure consumption plan and mapping
+on-premise VMs.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/19-1
+00:00:42.436 --> 00:00:49.369
+<v Ozzie Diaz>And you see them here in this column.
+May or may not necessarily be the first</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/19-2
+00:00:49.369 --> 00:00:56.836
+<v Ozzie Diaz>column, but you got to look for those VMs.
+That's already covered in the layer one.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/24-0
+00:00:57.956 --> 00:01:08.193
+<v Ozzie Diaz>and doing a least cost matching to the
+CPU, the memory specs. And in addition,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/24-1
+00:01:08.193 --> 00:01:16.876
+<v Ozzie Diaz>we'll show after the VM is matched on
+managed disk sizing as well.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/29-0
+00:01:17.236 --> 00:01:23.367
+<v Ozzie Diaz>And we use this example to cover
+different scenarios for the agent to</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/29-1
+00:01:23.367 --> 00:01:30.374
+<v Ozzie Diaz>understand what to do in those different
+scenarios. The difference though here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/29-2
+00:01:30.374 --> 00:01:37.205
+<v Ozzie Diaz>because we're doing an Azure Virtual
+Machine mapping through the Retail Price</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/29-3
+00:01:37.205 --> 00:01:37.556
+<v Ozzie Diaz>API.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/33-0
+00:01:37.956 --> 00:01:47.629
+<v Ozzie Diaz>We only want to do the powered on VMs for
+the Azure VM least cost matching that</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/33-1
+00:01:47.629 --> 00:01:53.796
+<v Ozzie Diaz>will then sum up to the Azure consumption
+revenue.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/35-0
+00:01:55.476 --> 00:01:56.276
+<v Ozzie Diaz>So...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/40-0
+00:01:57.396 --> 00:02:02.402
+<v Ozzie Diaz>Here,
+I've already started that exercise to do</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/40-1
+00:02:02.402 --> 00:02:10.924
+<v Ozzie Diaz>the human-based business analyst flow,
+so you can see the challenges that we go</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/40-2
+00:02:10.924 --> 00:02:16.250
+<v Ozzie Diaz>through,
+so that you can adapt in similar ways of</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/40-3
+00:02:16.250 --> 00:02:16.676
+<v Ozzie Diaz>how.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/44-0
+00:02:16.756 --> 00:02:25.161
+<v Ozzie Diaz>we do the analytics adaptation for the
+least cost Azure VM matching.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/44-1
+00:02:25.161 --> 00:02:32.836
+<v Ozzie Diaz>Now we use an Excel add-in,
+Microsoft Excel add-in called XA2.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/49-0
+00:02:34.196 --> 00:02:40.664
+<v Ozzie Diaz>you won't have access to that,
+so you'll have to build in the logic</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/49-1
+00:02:40.664 --> 00:02:47.037
+<v Ozzie Diaz>yourself or review the existing logic and
+potentially refactor it.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/49-2
+00:02:47.037 --> 00:02:53.316
+<v Ozzie Diaz>So in this example here,
+I've already done a bunch of matching to</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/53-0
+00:02:53.876 --> 00:03:00.246
+<v Ozzie Diaz>the to the VMs, the CPU count,
+the memory count,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/53-1
+00:03:00.246 --> 00:03:09.476
+<v Ozzie Diaz>although I've had to convert from MIB for
+memory to gigabytes decibel.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/56-0
+00:03:10.276 --> 00:03:17.018
+<v Ozzie Diaz>And that conversion needs to be done
+before you do the Azure Retail Price API</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/56-1
+00:03:17.018 --> 00:03:17.796
+<v Ozzie Diaz>look now.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/58-0
+00:03:18.676 --> 00:03:23.731
+<v Ozzie Diaz>For many of the virtual machines,
+for the CPU count,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/58-1
+00:03:23.731 --> 00:03:26.116
+<v Ozzie Diaz>and for the memory in GB.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/64-0
+00:03:27.396 --> 00:03:32.119
+<v Ozzie Diaz>I have gotten successful matching to an
+Azure,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/64-1
+00:03:32.119 --> 00:03:36.540
+<v Ozzie Diaz>a least cost matched Azure virtual
+machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/64-2
+00:03:36.540 --> 00:03:43.976
+<v Ozzie Diaz>Now the XA2 function does that
+automatically for me, the least cost part.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/64-3
+00:03:43.976 --> 00:03:47.996
+<v Ozzie Diaz>You have to also do the least cost part.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/69-0
+00:03:48.676 --> 00:03:56.185
+<v Ozzie Diaz>For whatever number of Azure VM SKUs come
+back, pick the least cost,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/69-1
+00:03:56.185 --> 00:04:04.457
+<v Ozzie Diaz>and we'll start with pay-as-you-go,
+but we also want to ultimately show the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/69-2
+00:04:04.457 --> 00:04:07.396
+<v Ozzie Diaz>reserved instance one year.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/70-0
+00:04:07.716 --> 00:04:09.796
+<v Ozzie Diaz>The reserved instance, 3 year.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/75-0
+00:04:10.676 --> 00:04:15.954
+<v Ozzie Diaz>The savings plan, one year,
+the savings plan, three year,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/75-1
+00:04:15.954 --> 00:04:21.051
+<v Ozzie Diaz>if available.
+Sometimes for different VM SKUs on Azure,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/75-2
+00:04:21.051 --> 00:04:26.057
+<v Ozzie Diaz>not all of the pricing offers are
+available uniformly.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/75-3
+00:04:26.057 --> 00:04:29.516
+<v Ozzie Diaz>So you just have to annotate, provide.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/80-0
+00:04:30.596 --> 00:04:38.150
+<v Ozzie Diaz>warnings or errors when some are missing
+a particular pricing offer from the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/80-1
+00:04:38.150 --> 00:04:45.409
+<v Ozzie Diaz>perspective of the final ACR price may
+not be complete if some VMs in the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/80-2
+00:04:45.409 --> 00:04:49.236
+<v Ozzie Diaz>overall inventory, because we are doing</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/85-0
+00:04:49.476 --> 00:04:53.958
+<v Ozzie Diaz>per VM pricing and summing up the Azure
+consumption revenue.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/85-1
+00:04:53.958 --> 00:04:58.293
+<v Ozzie Diaz>We are not doing fleet wide because that
+is too imprecise.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/85-2
+00:04:58.293 --> 00:05:02.702
+<v Ozzie Diaz>And for a business case or a total cost
+of ownership model,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/85-3
+00:05:02.702 --> 00:05:08.287
+<v Ozzie Diaz>our customers expect more precision.
+That's why we do this on a per virtual</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/85-4
+00:05:08.287 --> 00:05:09.316
+<v Ozzie Diaz>machine basis.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/88-0
+00:05:10.116 --> 00:05:18.756
+<v Ozzie Diaz>So let me show you some of the challenges
+of the VMs that initially did not.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/93-0
+00:05:19.636 --> 00:05:26.142
+<v Ozzie Diaz>match, or in other words,
+provided errors using our Excel add-in</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/93-1
+00:05:26.142 --> 00:05:30.547
+<v Ozzie Diaz>XA2,
+you see here in the form of this error</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/93-2
+00:05:30.547 --> 00:05:35.251
+<v Ozzie Diaz>value here.
+So it's not a successful VM match.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/93-3
+00:05:35.251 --> 00:05:39.556
+<v Ozzie Diaz>The reason these have successfully
+matched</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/98-0
+00:05:41.556 --> 00:05:49.027
+<v Ozzie Diaz>is because I had to manually adjust.
+In this example, when you see green,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/98-1
+00:05:49.027 --> 00:05:56.498
+<v Ozzie Diaz>that means I adjusted down the original
+CPU count, or actually it's vCPU,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/98-2
+00:05:56.498 --> 00:06:01.748
+<v Ozzie Diaz>virtual CPUs,
+because we're talking about a virtual</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/98-3
+00:06:01.748 --> 00:06:02.556
+<v Ozzie Diaz>machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/101-0
+00:06:03.276 --> 00:06:09.756
+<v Ozzie Diaz>I, I, I adjusted them down, uh,
+basically one by one.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/107-0
+00:06:10.876 --> 00:06:17.694
+<v Ozzie Diaz>one vCPU at a time until I got a
+successful match for a least cost Azure</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/107-1
+00:06:17.694 --> 00:06:22.550
+<v Ozzie Diaz>virtual machine.
+And the reason I colored it green,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/107-2
+00:06:22.550 --> 00:06:29.181
+<v Ozzie Diaz>that's just a formatting thing for me,
+for the human business analyst,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/107-3
+00:06:29.181 --> 00:06:30.396
+<v Ozzie Diaz>to show that.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/112-0
+00:06:31.036 --> 00:06:35.446
+<v Ozzie Diaz>the vCPU count went down for this match
+VM here.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/112-1
+00:06:35.446 --> 00:06:42.646
+<v Ozzie Diaz>So the price is theoretically better than
+if I had left the original vCPU count</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/112-2
+00:06:42.646 --> 00:06:49.756
+<v Ozzie Diaz>that came from the original RV tools file
+from the customer. And if instead...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/116-0
+00:06:49.876 --> 00:06:55.033
+<v Ozzie Diaz>I ended up going up on memory and left
+that,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/116-1
+00:06:55.033 --> 00:07:04.315
+<v Ozzie Diaz>we would end up over inflating the Azure
+consumption revenue with very expensive</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/116-2
+00:07:04.315 --> 00:07:08.556
+<v Ozzie Diaz>VMs. So this is a bit of a balancing.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/121-0
+00:07:09.036 --> 00:07:15.277
+<v Ozzie Diaz>Exercise here, when we see, for example,
+in this example here, the original,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/121-1
+00:07:15.277 --> 00:07:20.303
+<v Ozzie Diaz>the original value was 8. No,
+I think it was, I think it was,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/121-2
+00:07:20.303 --> 00:07:25.652
+<v Ozzie Diaz>I think it was might be something 12,
+but maybe it was something,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/121-3
+00:07:25.652 --> 00:07:27.436
+<v Ozzie Diaz>it was something that.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/126-0
+00:07:28.076 --> 00:07:33.223
+<v Ozzie Diaz>did not, yes,
+something that yielded an error in terms</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/126-1
+00:07:33.223 --> 00:07:40.991
+<v Ozzie Diaz>of the XA2 functions look up through the
+same Azure Retail Price API that you will</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/126-2
+00:07:40.991 --> 00:07:47.356
+<v Ozzie Diaz>use did not yield a match.
+So then as I started, as I started going</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/131-0
+00:07:47.836 --> 00:07:55.972
+<v Ozzie Diaz>Going down in, you know, well,
+11 VCPU increments to see when did I get</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/131-1
+00:07:55.972 --> 00:08:02.074
+<v Ozzie Diaz>when did I get the the the 1st order
+match, and well,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/131-2
+00:08:02.074 --> 00:08:08.516
+<v Ozzie Diaz>so so in this example here,
+look looks like the I I got.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/136-0
+00:08:09.276 --> 00:08:13.590
+<v Ozzie Diaz>A VM,
+an Azure Virtual Machine match just</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/136-1
+00:08:13.590 --> 00:08:19.035
+<v Ozzie Diaz>having brought down the original value by
+two vCPUs,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/136-2
+00:08:19.035 --> 00:08:27.356
+<v Ozzie Diaz>so the goal is the adaptations that we
+have to manually hit here, and you see...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/140-0
+00:08:27.676 --> 00:08:36.188
+<v Ozzie Diaz>There were a few virtual machine CPU
+quantities that I had to reduce down</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/140-1
+00:08:36.188 --> 00:08:44.355
+<v Ozzie Diaz>until I got a match on the Azure,
+the least cost matched Azure virtual</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/140-2
+00:08:44.355 --> 00:08:45.276
+<v Ozzie Diaz>machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/145-0
+00:08:46.636 --> 00:08:52.789
+<v Ozzie Diaz>We try to do that as close to what the
+customer's original counts are,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/145-1
+00:08:52.789 --> 00:08:59.376
+<v Ozzie Diaz>but we're also trying to optimize price.
+We're trying to optimize this in a</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/145-2
+00:08:59.376 --> 00:09:04.229
+<v Ozzie Diaz>business case,
+so we cannot over-inflate the monthly or</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/145-3
+00:09:04.229 --> 00:09:05.356
+<v Ozzie Diaz>annual Azure.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/150-0
+00:09:05.436 --> 00:09:13.283
+<v Ozzie Diaz>consumption pricing for a VM just to get
+for the sake of getting a match in with a</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/150-1
+00:09:13.283 --> 00:09:20.374
+<v Ozzie Diaz>SKU off of the retail price API.
+So now let's go into a different scenario</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/150-2
+00:09:20.374 --> 00:09:24.156
+<v Ozzie Diaz>that has to be accounted for as well. So</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/155-0
+00:09:24.796 --> 00:09:32.037
+<v Ozzie Diaz>In this next scenario,
+I did not make any modifications on the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/155-1
+00:09:32.037 --> 00:09:40.197
+<v Ozzie Diaz>vCPU side, but instead, actually,
+so let's go back to an example here.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/155-2
+00:09:40.197 --> 00:09:42.956
+<v Ozzie Diaz>So I talked before about</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/160-0
+00:09:43.836 --> 00:09:48.996
+<v Ozzie Diaz>Balancing,
+so where do I go down to get an Azure</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/160-1
+00:09:48.996 --> 00:09:56.895
+<v Ozzie Diaz>Virtual Machine least cost match,
+or potentially even have to go up to get</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/160-2
+00:09:56.895 --> 00:10:03.636
+<v Ozzie Diaz>a least cost Azure Virtual Machine match?
+Now, it originally...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/162-0
+00:10:03.996 --> 00:10:10.476
+<v Ozzie Diaz>This was 10 CPUs on this and this VM here
+with eight.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/167-0
+00:10:11.556 --> 00:10:18.513
+<v Ozzie Diaz>gigabytes after the conversion from MIB
+to gigabytes of memory. Now,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/167-1
+00:10:18.513 --> 00:10:26.578
+<v Ozzie Diaz>what that feels like here is it does not
+feel like a terribly high memory bound</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/167-2
+00:10:26.578 --> 00:10:31.116
+<v Ozzie Diaz>workload that's running in that
+application.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/169-0
+00:10:31.436 --> 00:10:37.356
+<v Ozzie Diaz>So, we don't want to go up on the memory.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/173-0
+00:10:38.436 --> 00:10:44.977
+<v Ozzie Diaz>value to get an Azure Virtual Machine,
+least cost Azure Virtual Machine match,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/173-1
+00:10:44.977 --> 00:10:51.436
+<v Ozzie Diaz>that's going to end up inflating the
+pricing in the business case needlessly.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/178-0
+00:10:53.116 --> 00:11:00.601
+<v Ozzie Diaz>But there are some circumstances where we
+see a higher memory count here.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/178-1
+00:11:00.601 --> 00:11:08.288
+<v Ozzie Diaz>What might have been there before was 18
+or 24 CPUs in that virtual machine</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/178-2
+00:11:08.288 --> 00:11:12.436
+<v Ozzie Diaz>sitting alongside 24 gigabytes of memory.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/182-0
+00:11:12.516 --> 00:11:17.036
+<v Ozzie Diaz>memory.
+Now because that's a little higher on the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/182-1
+00:11:17.036 --> 00:11:20.923
+<v Ozzie Diaz>memory,
+I don't want to go higher on there</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/182-2
+00:11:20.923 --> 00:11:24.901
+<v Ozzie Diaz>because that'll really create an
+inflation,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/182-3
+00:11:24.901 --> 00:11:28.156
+<v Ozzie Diaz>an overinflation of the pricing. So.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/187-0
+00:11:29.916 --> 00:11:36.476
+<v Ozzie Diaz>I gradually started decrementing on the
+number of eCPUs to get a successful match</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/187-1
+00:11:36.476 --> 00:11:42.236
+<v Ozzie Diaz>for the least cost Azure virtual machine.
+And we'll have a lot of those</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/187-2
+00:11:42.236 --> 00:11:44.156
+<v Ozzie Diaz>circumstances. But here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/190-0
+00:11:47.516 --> 00:11:54.621
+<v Ozzie Diaz>where we have one vCPU, well,
+we can't decrement down from that anyways.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/190-1
+00:11:54.621 --> 00:11:59.196
+<v Ozzie Diaz>And there's a very low memory because 128
+MIB.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/196-0
+00:12:00.476 --> 00:12:07.041
+<v Ozzie Diaz>basically equates to a number that's less
+than one decimal.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/196-1
+00:12:07.041 --> 00:12:15.904
+<v Ozzie Diaz>So I basically just rounded up or started
+incrementing on a one GB basis until I</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/196-2
+00:12:15.904 --> 00:12:21.156
+<v Ozzie Diaz>got the first least cost Azure virtual
+machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/201-0
+00:12:21.356 --> 00:12:25.995
+<v Ozzie Diaz>match.
+And so the reason I codified or formatted</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/201-1
+00:12:25.995 --> 00:12:33.665
+<v Ozzie Diaz>this yellow for me is that I went up in
+the count with respect to the customer's</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/201-2
+00:12:33.665 --> 00:12:39.346
+<v Ozzie Diaz>original inventory.
+So we see we saw many of those here and</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/201-3
+00:12:39.346 --> 00:12:40.956
+<v Ozzie Diaz>here I'll just do</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/205-0
+00:12:41.116 --> 00:12:46.234
+<v Ozzie Diaz>An example live that right now I'm
+getting an error,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/205-1
+00:12:46.234 --> 00:12:53.862
+<v Ozzie Diaz>so I'm not getting an Azure Retail Price
+API least cost VM matching with these</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/205-2
+00:12:53.862 --> 00:13:00.236
+<v Ozzie Diaz>counts here as they stand,
+so I'm going to start incrementing up.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/207-0
+00:13:00.316 --> 00:13:05.916
+<v Ozzie Diaz>By one, and I did,
+and then you see a successful.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/209-0
+00:13:06.956 --> 00:13:10.476
+<v Ozzie Diaz>Match there through the Azure Retail Rice
+API.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/215-0
+00:13:11.996 --> 00:13:17.068
+<v Ozzie Diaz>So that basically gives us,
+and by the way, again,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/215-1
+00:13:17.068 --> 00:13:22.041
+<v Ozzie Diaz>it is only for powered on VMs.
+You see that here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/215-2
+00:13:22.041 --> 00:13:28.207
+<v Ozzie Diaz>powered on VMs for calculating the Azure
+consumption revenue.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/215-3
+00:13:28.207 --> 00:13:30.396
+<v Ozzie Diaz>So then we'll look at.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/220-0
+00:13:32.076 --> 00:13:37.191
+<v Ozzie Diaz>the different pricing offers.
+And we just have to,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/220-1
+00:13:37.191 --> 00:13:45.415
+<v Ozzie Diaz>so I'm just going to clear a filter here
+to then get the entire list to show so I</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/220-2
+00:13:45.415 --> 00:13:52.436
+<v Ozzie Diaz>can show you illustratively what's going
+on. And you see that there's</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/225-0
+00:13:52.796 --> 00:14:00.435
+<v Ozzie Diaz>There's a few VMs, the standard F1,
+that does not have three-year reserved</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/225-1
+00:14:00.435 --> 00:14:07.972
+<v Ozzie Diaz>instance. So that could be problematic.
+Is it possible to find a standard</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/225-2
+00:14:07.972 --> 00:14:12.556
+<v Ozzie Diaz>D-series, D as in David,
+series that is not?</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/229-0
+00:14:12.796 --> 00:14:19.528
+<v Ozzie Diaz>overly inflated related to the price of
+this initial least cost matching Azure</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/229-1
+00:14:19.528 --> 00:14:24.557
+<v Ozzie Diaz>virtual machine,
+that's probably something good to attempt</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/229-2
+00:14:24.557 --> 00:14:30.352
+<v Ozzie Diaz>because generally those would have
+three-year reserved instance and</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/229-3
+00:14:30.352 --> 00:14:31.716
+<v Ozzie Diaz>potentially also</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/234-0
+00:14:32.396 --> 00:14:35.787
+<v Ozzie Diaz>Well,
+one and three year reserved instance</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/234-1
+00:14:35.787 --> 00:14:39.731
+<v Ozzie Diaz>offers,
+as well as potentially one and three year</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/234-2
+00:14:39.731 --> 00:14:44.464
+<v Ozzie Diaz>savings plan offers.
+So that's a little bit of the juggling</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/234-3
+00:14:44.464 --> 00:14:48.566
+<v Ozzie Diaz>and adaptation that the business analyst
+has to do.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/234-4
+00:14:48.566 --> 00:14:52.116
+<v Ozzie Diaz>We want this implemented and codified in
+the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/238-0
+00:14:52.716 --> 00:14:59.819
+<v Ozzie Diaz>Business case development application.
+So that covers a virtual machine.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/238-1
+00:14:59.819 --> 00:15:05.756
+<v Ozzie Diaz>Now here, let's talk about managed disk.
+So there's storage.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/241-0
+00:15:09.516 --> 00:15:18.316
+<v Ozzie Diaz>There's storage that is associated with
+the virtual machines, and similar to...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/247-0
+00:15:19.556 --> 00:15:26.542
+<v Ozzie Diaz>the CPU and memory,
+if we had utilization numbers for CPU</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/247-1
+00:15:26.542 --> 00:15:35.455
+<v Ozzie Diaz>usage and utilization or in use,
+whatever other analogous keywords can be</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/247-2
+00:15:35.455 --> 00:15:40.876
+<v Ozzie Diaz>used to find utilization for memory as
+well.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/252-0
+00:15:41.356 --> 00:15:47.095
+<v Ozzie Diaz>Once we convert it to GB decimal,
+we would want to use that because that is</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/252-1
+00:15:47.095 --> 00:15:51.929
+<v Ozzie Diaz>the right sizing. Now,
+I have not been able to right size here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/252-2
+00:15:51.929 --> 00:15:58.047
+<v Ozzie Diaz>so right sizing in this case right here
+for memory and CPUs related to the Azure</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/252-3
+00:15:58.047 --> 00:16:02.956
+<v Ozzie Diaz>Virtual Machine least cost matching,
+I will do the right sizing.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/257-0
+00:16:03.116 --> 00:16:10.645
+<v Ozzie Diaz>fallback after the fact.
+And my rule of thumb is 60%,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/257-1
+00:16:10.645 --> 00:16:22.078
+<v Ozzie Diaz>60% of the CPU and the memory utilization,
+so that may yield a different Azure VM</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/257-2
+00:16:22.078 --> 00:16:22.636
+<v Ozzie Diaz>SKU.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/260-0
+00:16:23.036 --> 00:16:31.916
+<v Ozzie Diaz>for least cost matching. For memory,
+sometimes we'll do.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/266-0
+00:16:32.716 --> 00:16:44.457
+<v Ozzie Diaz>I'm going to take that back.
+60% utilization for CPU and 40 or 50%,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/266-1
+00:16:44.457 --> 00:16:50.156
+<v Ozzie Diaz>sometimes 40% utilization on CPU.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/267-0
+00:16:51.036 --> 00:16:51.596
+<v Ozzie Diaz>Memory.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/272-0
+00:16:52.876 --> 00:16:58.942
+<v Ozzie Diaz>I might have those two backwards,
+so take a note that the fallback</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/272-1
+00:16:58.942 --> 00:17:03.559
+<v Ozzie Diaz>assumptions that are in the application
+right now,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/272-2
+00:17:03.559 --> 00:17:09.353
+<v Ozzie Diaz>leave those untouched as you consider how
+to refactor the code.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/272-3
+00:17:09.353 --> 00:17:11.436
+<v Ozzie Diaz>But let's talk about...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/276-0
+00:17:11.516 --> 00:17:16.381
+<v Ozzie Diaz>The storage here, so we do have,
+hopefully,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/276-1
+00:17:16.381 --> 00:17:22.020
+<v Ozzie Diaz>in the customer RV tools that we've been
+provided,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/276-2
+00:17:22.020 --> 00:17:30.756
+<v Ozzie Diaz>hopefully we have a column that will be
+the in use for storage, and now the...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/281-0
+00:17:31.756 --> 00:17:37.682
+<v Ozzie Diaz>The original will usually be, and again,
+in MIB format,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/281-1
+00:17:37.682 --> 00:17:46.466
+<v Ozzie Diaz>we need to convert to GB decimal format.
+So this utilized storage is what is going</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/281-2
+00:17:46.466 --> 00:17:50.276
+<v Ozzie Diaz>into the matching of a managed disk.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/285-0
+00:17:51.116 --> 00:17:55.831
+<v Ozzie Diaz>And then, you know,
+we get the calculation for pay as you go</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/285-1
+00:17:55.831 --> 00:18:01.783
+<v Ozzie Diaz>or retail price monthly. And of course,
+we'll want to extend that, you know,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/285-2
+00:18:01.783 --> 00:18:02.556
+<v Ozzie Diaz>to annual.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/290-0
+00:18:03.876 --> 00:18:08.007
+<v Ozzie Diaz>Now,
+one thing that needs to be accounted for</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/290-1
+00:18:08.007 --> 00:18:12.138
+<v Ozzie Diaz>as well,
+sometimes we'll get these in use MIB</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/290-2
+00:18:12.138 --> 00:18:16.628
+<v Ozzie Diaz>values for a virtual machine that are
+very large.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/290-3
+00:18:16.628 --> 00:18:22.556
+<v Ozzie Diaz>And so this one basically converts once
+we convert to GB decimal.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/295-0
+00:18:22.876 --> 00:18:29.012
+<v Ozzie Diaz>to 202,000, almost 203,
+000 gigabytes of storage.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/295-1
+00:18:29.012 --> 00:18:35.885
+<v Ozzie Diaz>And the thing is,
+is that there is not a single managed</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/295-2
+00:18:35.885 --> 00:18:42.636
+<v Ozzie Diaz>disk on the Azure Pricing Retail API that
+can fulfill.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/300-0
+00:18:42.876 --> 00:18:48.811
+<v Ozzie Diaz>that one single storage size,
+but we also notice that we have other</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/300-1
+00:18:48.811 --> 00:18:55.707
+<v Ozzie Diaz>metadata here that's helpful with these
+large numbers here in this column that</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/300-2
+00:18:55.707 --> 00:19:01.381
+<v Ozzie Diaz>says, it's called disks.
+It could be number of disks or be named</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/300-3
+00:19:01.381 --> 00:19:04.436
+<v Ozzie Diaz>something, so just be ready to find</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/305-0
+00:19:04.716 --> 00:19:12.213
+<v Ozzie Diaz>the quantity of disks on that virtual
+machine, and you see that as 42.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/305-1
+00:19:12.213 --> 00:19:20.556
+<v Ozzie Diaz>So there are actually 42 disks that are
+yielding this overall just almost 203,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/305-2
+00:19:20.556 --> 00:19:23.196
+<v Ozzie Diaz>000 gigabytes of storage.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/308-0
+00:19:23.676 --> 00:19:30.801
+<v Ozzie Diaz>So we'll want to use that into Account to
+then to find the,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/308-1
+00:19:30.801 --> 00:19:35.196
+<v Ozzie Diaz>and the configuration default is LRS.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/313-0
+00:19:36.276 --> 00:19:40.218
+<v Ozzie Diaz>We don't need GRS or any of that,
+because again,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/313-1
+00:19:40.218 --> 00:19:45.448
+<v Ozzie Diaz>this is a business case and we're trying
+to get an optimal cost,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/313-2
+00:19:45.448 --> 00:19:50.195
+<v Ozzie Diaz>an optimal business case,
+and not an overinflated solution</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/313-3
+00:19:50.195 --> 00:19:55.103
+<v Ozzie Diaz>architecture in the business case.
+But in this example here,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/313-4
+00:19:55.103 --> 00:19:57.276
+<v Ozzie Diaz>25 E60 managed disks are...</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/318-0
+00:19:57.676 --> 00:20:05.152
+<v Ozzie Diaz>Matching to be able to fulfill this
+overall in use GB for this particular</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/318-1
+00:20:05.152 --> 00:20:11.618
+<v Ozzie Diaz>example here, so that's been, and again,
+you know, I, you know,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/318-2
+00:20:11.618 --> 00:20:17.276
+<v Ozzie Diaz>I codified it or formatted it yellow to
+flag to myself.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/323-0
+00:20:17.596 --> 00:20:26.153
+<v Ozzie Diaz>that is a higher cost because there are
+multiple of those that yielded the match.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/323-1
+00:20:26.153 --> 00:20:34.606
+<v Ozzie Diaz>And then you see other examples down here
+where multiple E70 disks to be able to</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/323-2
+00:20:34.606 --> 00:20:38.676
+<v Ozzie Diaz>achieve this overall volume of storage.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/328-0
+00:20:39.116 --> 00:20:44.010
+<v Ozzie Diaz>and so forth.
+So once once all of the errors and the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/328-1
+00:20:44.010 --> 00:20:50.843
+<v Ozzie Diaz>matchings have occurred using the
+methodology and some of the some of the</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/328-2
+00:20:50.843 --> 00:20:57.676
+<v Ozzie Diaz>adaptation techniques that I talked about
+in the earlier in this session,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/333-0
+00:20:57.916 --> 00:21:03.090
+<v Ozzie Diaz>are achieved,
+then we sum up the consumption to annual</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/333-1
+00:21:03.090 --> 00:21:10.710
+<v Ozzie Diaz>to show here is pay as you go annual,
+here is one year reserved instance annual,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/333-2
+00:21:10.710 --> 00:21:14.944
+<v Ozzie Diaz>here is three year reserved instance
+annual,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/333-3
+00:21:14.944 --> 00:21:19.836
+<v Ozzie Diaz>and then if there's one in three year
+savings plan,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/338-0
+00:21:20.316 --> 00:21:24.467
+<v Ozzie Diaz>Then we'll include those as well for the
+virtual machines.</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/338-1
+00:21:24.467 --> 00:21:29.955
+<v Ozzie Diaz>And then we'll do the same thing for
+whatever pricing offers are available to</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/338-2
+00:21:29.955 --> 00:21:33.966
+<v Ozzie Diaz>the managed disks,
+matching starting with pay-as-you-go,</v>
+
+3013b684-f9c1-41eb-a6fb-77b773a20961/338-3
+00:21:33.966 --> 00:21:37.836
+<v Ozzie Diaz>annual to whatever other pricing offers
+are available.</v>

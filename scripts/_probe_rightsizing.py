@@ -14,7 +14,7 @@ def load(path):
 
 for wb_name, label in [
     ("Template_BV Benchmark Business Case v6.xlsm", "TEMPLATE"),
-    ("Reliance_BV Benchmark Business Case v6.xlsm", "RELIANCE"),
+    ("<reference-workbook.xlsm>", "REFERENCE"),
 ]:
     wb = load(wb_name)
     cv = wb["1-Client Variables"]
@@ -62,11 +62,11 @@ for wb_name, label in [
         if capture and "5.1.1.3" in label2:
             break
 
-# Now check what the 2.3% gap actually traces to in Reliance
+# Now check what the 2.3% gap actually traces to in reference
 print(f"\n{'='*70}")
-print("  RESIDUAL 2.3% GAP ANALYSIS — Reliance")
+print("  RESIDUAL 2.3% GAP ANALYSIS — reference")
 print(f"{'='*70}")
-wb = load("Reliance_BV Benchmark Business Case v6.xlsm")
+wb = load("<reference-workbook.xlsm>")
 inputs = build_inputs_from_workbook(wb)
 bm = BenchmarkConfig.from_yaml("data/benchmarks_default.yaml")
 sq  = compute_sq(inputs, bm)

@@ -5,12 +5,62 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## v1.4.0 — Layer 1 BA Parity (training corpus + engine convergence)
+**Date:** 2026-04-27 | **Tests:** 14 new parity tests ✅ + existing suite unchanged
+
+### What changed
+
+Established a **BA-trained ground-truth pipeline** for Layer 1 (RVTools ingest)
+and converged the engine to match it. The training corpus, replica oracle, and
+parity harness now form an executable specification of the human BA's workflow.
+
+**New: `training/` corpus (Phase 0–2, Layer 1)**
+- `training/baseline_workflow/layer{1,2,3}_*/` — verbatim BA training
+  transcripts (.vtt + .docx) and recording hint files.
+- `training/ba_rules/layer1.yaml` — 22 BA-reviewed rules + 6 cross-cutting
+  key principles (KP.PER_VM, KP.MIB_DEFAULT, KP.SYNONYM_HEADERS,
+  KP.MANDATORY_VINFO, KP.PROVISIONED_FOR_TCO, KP.BA_APPROVAL_GATE).
+- `training/replicas/layer1_ba_replica.py` — engine-independent oracle
+  implementing the rule book; exposes `replicate_layer1(path) -> Layer1Result`
+  with per-VM authoritative payload + BA review packet.
+- `training/parity/run_layer1_parity.py` — three-way diff (replica vs BA vs
+  engine) with per-field tolerance and Markdown report output.
+- `training/baselines/customer_a_2024_10/` — Customer A reference: BA-expected values,
+  replica outputs, full per-VM dump, parity report.
+
+**Engine fixes (drove engine to 7/7 parity at 0.00% delta on Customer A)**
+- **L1.STORAGE_PROV.001 (DELTA → MATCH):** New `RVToolsInventory.total_storage_provisioned_gb`
+  + `storage_provisioned_source` ("vpartition" | "vinfo"). Aggregation now
+  follows BA source preference: vPartition Capacity (sum across ALL rows,
+  regardless of powerstate, for the canonical TCO sum) → vInfo Provisioned
+  per-VM fallback when vPartition is absent. Customer A: 4,389,810 (BA) vs 4,389,831
+  (engine) = 0.00%.
+- **L1.HOST.002 (DELTA → MATCH):** Reverted v1.3.0 H3's `_hosts_with_vms`
+  cross-match. Per BA: count ALL vHost rows (the customer paid for every
+  host listed; out-of-scope filtering is the customer/BA's responsibility
+  upstream of the file). Customer A: 280 (BA) vs 280 (engine) = 0.00%.
+
+**Tests**
+- `tests/test_layer1_parity.py` — 14 parametrized parity assertions (replica
+  vs BA + engine vs BA) on 7 Layer 1 fields. CI-skips when Customer A sample is
+  unavailable; otherwise hard-fails on >tolerance delta.
+- Pre-existing failures in `TestRVToolsParser` (missing fixture file) and
+  `TestConsumptionBuilderStorage` (3 storage-priority tests) are unchanged
+  by this work — verified by `git stash` + re-run.
+
+**Per-VM directive (KP.PER_VM)**
+The rule book now formalises that all business-case math is per-VM and
+summed; fleet aggregates exist only as FYI for the BA. Replica enforces
+this end-to-end. Engine convergence in Layer 2/3 will follow the same rule.
+
+---
+
 ## v1.3.1 — Refactor: Fact Checker — Pipeline Health Checks
 **Commits:** `532c68b`, `19e28bb` | **Date:** 2026-04-16
 
 ### What changed
 
-Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1–C3, H4, M1) that produced incorrect outputs in prior UHHS analysis — bugs the existing Excel cross-check could not detect because they affected inputs, not the financial model math.
+Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1–C3, H4, M1) that produced incorrect outputs in prior Customer A analysis — bugs the existing Excel cross-check could not detect because they affected inputs, not the financial model math.
 
 **`engine/fact_checker.py`:**
 - New `_check_pipeline_plausibility(inputs)` — catches: `annual_compute_consumption_lc_y10 = 0` (broken pricing cache, C1), implied storage rate outside `$0.01–$0.50/GB/mo` (wrong `gb_rate`, C2), `azure_storage_gb = 0` with on-prem storage present (wrong storage source, C3), `num_vms = 0` or `allocated_vcpu = 0` (silent parse failure), `vcpu_per_core` outside `[1.0–8.0]` (zero-vCPU hosts, H4), `azure_vcpu > 2× on-prem vCPU` (host-proxy anomaly, M1), compute cost/vCPU outside `$150–$8k/yr`.
@@ -19,7 +69,7 @@ Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1
 - `passed_overall` now requires zero pipeline warnings in addition to zero FAIL checks.
 
 **`app/pages/fact_checker_page.py`:**
-- New **"🚦 Pipeline Health"** tab (first tab) — 12 targeted checks covering all UHHS failure modes; shows red banner with remediation instructions when any check fails; raw metric tiles for VMs, vCPU, Azure vCPU, storage GB, compute cost/yr, storage cost/yr.
+- New **"🚦 Pipeline Health"** tab (first tab) — 12 targeted checks covering all Customer A failure modes; shows red banner with remediation instructions when any check fails; raw metric tiles for VMs, vCPU, Azure vCPU, storage GB, compute cost/yr, storage cost/yr.
 - Excel Cross-Check tab now also surfaces pipeline warnings above the check table.
 - Tab order: 🚦 Pipeline Health → 🧮 Engine Sanity → 📋 Excel Cross-Check.
 
@@ -30,7 +80,7 @@ Refactored the fact-checker subsystem to catch the exact parser/pricing bugs (C1
 
 ### What changed
 
-Resolved 12 bugs identified in post-engagement UHHS analysis. Full details in `FIX_PROPOSAL.md`.
+Resolved 12 bugs identified in post-engagement Customer A analysis. Full details in `FIX_PROPOSAL.md`.
 
 **Critical (C-series):**
 - **C1 — Broken pricing cache guard** (`azure_sku_matcher.py`): empty/all-zero cache files were silently read, producing `$0` compute costs. Added guard in `_read_vm_price_cache` / `_read_cache` to reject empty or all-zero caches.
@@ -546,7 +596,7 @@ Full validation run against the reference workbook. Five engine bugs fixed:
 4. Migration ramp: off-by-one in `(ramp_y − ramp_{y−1})` incremental fraction calculation
 5. NPV: Y0 was being discounted (should be undiscounted)
 
-`scripts/validate_vs_reliance.py` added: Track A (parser accuracy vs workbook inputs) and Track B (engine output accuracy vs workbook financial outputs).
+`scripts/validate_vs_reference.py` added: Track A (parser accuracy vs workbook inputs) and Track B (engine output accuracy vs workbook financial outputs).
 
 ---
 
