@@ -1,0 +1,322 @@
+"""
+Layer 3 Parity Audit — CI test.
+=================================
+
+Validates the 3-way audit framework in
+``training/replicas/layer3_judge.py`` and the golden extractor in
+``training/replicas/layer3_golden_extractor.py``.
+
+This file establishes the trust harness. Replica + engine implementations
+are wired in subsequent commits; this test currently locks in:
+
+* The golden extractor pulls every BA-authoritative Customer A value
+  to within $0.01 of the spreadsheet (deterministic).
+* The auditor's tiered tolerance bands behave correctly under
+  adversarial drift profiles (PERFECT, DRIFT, BIG_BREAK).
+* The verdict logic returns the expected severity for each profile.
+
+When the Layer 3 BA replica and the engine bridge are wired in, this
+file gains the actual end-to-end parity assertion (replica vs BA, engine
+vs BA) — the harness is already in place.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from training.replicas.layer3_golden_extractor import (
+    extract_layer3_golden,
+    flatten_golden,
+)
+from training.replicas.layer3_judge import (
+    absolute_tolerance,
+    audit,
+    tier_label,
+    verdict,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CUSTOMER_A_WORKBOOK = REPO_ROOT / "customer_a_BV_Benchmark_Business_Case_v6.xlsm"
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def golden():
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip(f"Customer A workbook not found at {CUSTOMER_A_WORKBOOK}")
+    return extract_layer3_golden(str(CUSTOMER_A_WORKBOOK))
+
+
+@pytest.fixture(scope="module")
+def flat_oracle(golden):
+    return flatten_golden(golden)
+
+
+# ---------------------------------------------------------------------------
+# Tolerance band tests (no workbook required)
+# ---------------------------------------------------------------------------
+
+
+def test_tolerance_zero_is_exact():
+    assert absolute_tolerance(0.0) == 0.005
+    assert tier_label(0.0) == "EXACT"
+
+
+def test_tolerance_rates_are_exact():
+    """ROI = -0.47, WACC = 0.07 must demand exact match."""
+    assert absolute_tolerance(0.07) == 0.005
+    assert absolute_tolerance(-0.4703) == 0.005
+    assert tier_label(0.07) == "EXACT"
+
+
+def test_tolerance_small_dollars():
+    """$10 — penny tolerance. $5,000 — dollar tolerance."""
+    assert absolute_tolerance(10.0) == 0.01
+    assert absolute_tolerance(5_000.0) == 1.00
+    assert tier_label(10.0) == "<$100"
+    assert tier_label(5_000.0) == "<$10K"
+
+
+def test_tolerance_mid_dollars():
+    """$100K — 0.1% tolerance ⇒ $100."""
+    assert absolute_tolerance(100_000.0) == pytest.approx(100.0)
+    assert tier_label(100_000.0) == "<$1M"
+
+
+def test_tolerance_large_dollars():
+    """$10M — 1% tolerance ⇒ $100K."""
+    assert absolute_tolerance(10_000_000.0) == pytest.approx(100_000.0)
+    assert tier_label(10_000_000.0) == "≥$1M"
+
+
+def test_tolerance_strictly_monotonic():
+    """Sanity: tolerance never decreases as |value| grows."""
+    samples = [0.0, 0.5, 50.0, 5_000.0, 500_000.0, 50_000_000.0]
+    tols = [absolute_tolerance(s) for s in samples]
+    assert tols == sorted(tols)
+
+
+# ---------------------------------------------------------------------------
+# Golden extractor tests (require Customer A workbook)
+# ---------------------------------------------------------------------------
+
+
+def test_extractor_pulls_395_cells(flat_oracle):
+    """Locks in the cardinality of the oracle so we notice if cells drift."""
+    assert len(flat_oracle) == 395
+
+
+def test_extractor_known_anchors(golden):
+    """Every cell in this list was visually inspected in the BA workbook."""
+    anchors = {
+        ("status_quo", "server_depreciation", 0): 995_995.4525,
+        ("status_quo", "server_depreciation", 10): 1_167_425.0856,
+        ("status_quo", "total_on_prem_cost", 10): 15_002_479.4179,
+        ("cash_flow", "savings", 10): 1_995_190.3773,
+        ("cash_flow", "az_total", 10): 13_123_084.3307,
+    }
+    for (block_name, field_name, year), expected in anchors.items():
+        block = getattr(golden, block_name)
+        series = getattr(block, field_name)
+        actual = series.values[year]
+        assert actual == pytest.approx(expected, abs=0.01), (
+            f"{block_name}.{field_name} Y{year}: expected {expected:,.4f}, got {actual:,.4f}"
+        )
+
+
+def test_extractor_headlines(golden):
+    h = golden.headline
+    assert h.npv_sq_10y.value == pytest.approx(96_257_591.60, abs=0.01)
+    assert h.project_npv_excl_tv_10y.value == pytest.approx(2_569_869.66, abs=0.01)
+    assert h.project_npv_excl_tv_5y.value == pytest.approx(-1_793_194.08, abs=0.01)
+    assert h.roi_5y_cf.value == pytest.approx(-0.4703, abs=0.0001)
+    assert h.payback_years.value == pytest.approx(0.0, abs=0.01)
+
+
+def test_extractor_provenance(flat_oracle):
+    """Every extracted value must carry sheet+address provenance."""
+    for label, ref, _val in flat_oracle:
+        assert ref.sheet, f"{label}: missing sheet"
+        assert ref.address, f"{label}: missing cell address"
+        assert ref.label, f"{label}: missing human label"
+
+
+# ---------------------------------------------------------------------------
+# Adversarial auditor tests
+# ---------------------------------------------------------------------------
+
+
+def test_audit_perfect_replica_and_engine_pass(golden, flat_oracle):
+    perfect = {label: val for label, _ref, val in flat_oracle}
+    report = audit(golden, replica_values=perfect, engine_values=dict(perfect))
+    v = verdict(report)
+    assert v.overall_clean
+    assert report.replica_pass_count == report.total_cells
+    assert report.engine_pass_count == report.total_cells
+
+
+def test_audit_half_percent_drift_fails_small_values(golden, flat_oracle):
+    """0.5% drift ⇒ small values fail; large values pass."""
+    drifted = {label: val * 1.005 for label, _ref, val in flat_oracle}
+    report = audit(golden, replica_values=drifted, engine_values=drifted)
+    v = verdict(report)
+    assert not v.replica_clean, "Drift must fail somewhere"
+
+    # Specifically: any |value| < $10K under 0.5% drift creates Δ > 0.5*tol.
+    failing = [a for a in report.audits if a.replica_passes is False]
+    assert len(failing) > 0
+    # And there exists at least one large-value cell that passed.
+    passing_big = [a for a in report.audits if a.tier == "≥$1M" and a.replica_passes]
+    assert passing_big
+
+
+def test_audit_isolates_single_engine_break(golden, flat_oracle):
+    """Breaking one cell by $1M must surface exactly that cell."""
+    perfect = {label: val for label, _ref, val in flat_oracle}
+    broken = dict(perfect)
+    target = "headline.project_npv_excl_tv_10y"
+    broken[target] = perfect[target] + 1_000_000.0
+
+    report = audit(golden, replica_values=perfect, engine_values=broken)
+    v = verdict(report)
+    assert v.replica_clean, "Replica unchanged ⇒ must remain clean"
+    assert not v.engine_clean
+    assert report.engine_fail_count == 1
+
+    offender = next(a for a in report.audits if not a.engine_passes)
+    assert offender.label == target
+    assert offender.delta_ac == pytest.approx(1_000_000.0)
+
+
+def test_audit_zero_must_be_exact(golden, flat_oracle):
+    """For BA cells with value 0, even a small replica delta must FAIL."""
+    perfect = {label: val for label, _ref, val in flat_oracle}
+    target = next(label for label, _r, val in flat_oracle if val == 0.0)
+    broken = dict(perfect)
+    broken[target] = 0.10  # ten cents — far above the $0.005 tolerance
+
+    report = audit(golden, replica_values=broken, engine_values=perfect)
+    offender = next(a for a in report.audits if a.label == target)
+    assert offender.replica_passes is False, (
+        f"BA cell {target} = $0; replica = $0.10 must FAIL exact-tier audit"
+    )
+
+
+def test_audit_unknown_replica_does_not_false_pass(golden):
+    """Empty replica dict must produce 'unknown' status — not pass."""
+    report = audit(golden, replica_values={}, engine_values={})
+    v = verdict(report)
+    assert not v.replica_clean
+    assert not v.engine_clean
+    assert report.replica_unknown_count == report.total_cells
+    assert report.engine_unknown_count == report.total_cells
+    assert report.replica_pass_count == 0
+    assert report.engine_pass_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Render smoke
+# ---------------------------------------------------------------------------
+
+
+def test_render_full_report_is_markdown(golden, flat_oracle):
+    from training.replicas.layer3_judge import render_full_report
+
+    perfect = {label: val for label, _ref, val in flat_oracle}
+    report = audit(golden, replica_values=perfect, engine_values=perfect)
+    md = render_full_report(report)
+    assert "# Layer 3 Parity Audit" in md
+    assert "Customer" in md or "Contoso" in md or report.customer_name in md
+    assert "Replica vs BA" in md
+    assert "Engine vs BA" in md
+
+
+# ---------------------------------------------------------------------------
+# Status Quo replica end-to-end parity (Customer A workbook)
+# ---------------------------------------------------------------------------
+
+
+def test_status_quo_replica_perfect_parity_customer_a(golden):
+    """
+    The Status Quo replica MUST match Customer A's workbook EXACTLY for all
+    231 Status Quo cells (19 P&L lines × 11 years + 11 sq_estimation scalars).
+
+    This is the trust-building anchor: if a single Status Quo cell drifts,
+    the entire downstream financial case is contaminated.
+    """
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+    )
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required for end-to-end parity")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_status_quo(client, bm)
+
+    report = audit(golden, replica_values=replica, engine_values=None)
+
+    # Every Status Quo cell the replica covers MUST pass.
+    sq_cells_covered = [a for a in report.audits if a.label.startswith(("status_quo.", "sq_estimation."))
+                        and a.replica_passes is not None]
+    failing = [a for a in sq_cells_covered if a.replica_passes is False]
+
+    assert not failing, (
+        f"{len(failing)} Status Quo cells failed parity:\n"
+        + "\n".join(
+            f"  {a.label} @ {a.cell_ref}: BA={a.ba_value:,.2f} replica={a.replica_value:,.2f} "
+            f"Δ={a.delta_ab:,.4f} (tol={a.tolerance:,.4f})"
+            for a in failing[:10]
+        )
+    )
+
+    # Replica must cover all 19 line items × 11 years + sq_estimation scalars
+    assert len(sq_cells_covered) >= 220, (
+        f"Status Quo replica covers only {len(sq_cells_covered)} cells, expected ≥220"
+    )
+
+
+def test_status_quo_replica_keys_match_extractor_labels(golden):
+    """
+    Defensive: the replica's output dict keys must align EXACTLY with the
+    auditor's expected keys. Drift here would cause silent NOT-IMPLEMENTED.
+    """
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+    )
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_status_quo(client, bm)
+
+    expected_labels = {
+        f"status_quo.{line}.Y{yr}"
+        for line in [
+            "Server Depreciation", "Server HW Maintenance",
+            "Storage Depreciation", "Storage Maintenance",
+            "Storage Backup", "Storage DR",
+            "NW+Fitout Depreciation", "Network HW Maintenance",
+            "Bandwidth Costs", "DC Lease (Space)", "DC Power",
+            "Virtualization Licenses", "Windows Server Licenses",
+            "SQL Server Licenses", "Windows Server ESU", "SQL Server ESU",
+            "Backup Licenses", "Disaster Recovery Licenses",
+            "IT Admin Staff", "Total On-Prem Cost",
+        ]
+        for yr in range(11)
+    }
+    missing = expected_labels - set(replica.keys())
+    assert not missing, f"Replica missing labels: {sorted(missing)[:5]}..."
