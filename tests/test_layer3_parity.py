@@ -320,3 +320,90 @@ def test_status_quo_replica_keys_match_extractor_labels(golden):
     }
     missing = expected_labels - set(replica.keys())
     assert not missing, f"Replica missing labels: {sorted(missing)[:5]}..."
+
+
+# ---------------------------------------------------------------------------
+# SQ Cash Flow + NPV replica end-to-end parity (Customer A workbook)
+# ---------------------------------------------------------------------------
+
+
+def test_sq_cash_flow_replica_perfect_parity_customer_a(golden):
+    """
+    The SQ cash-flow view + SQ NPV scalars MUST match Customer A's workbook
+    exactly (42 additional cells beyond the Status Quo P&L block).
+    """
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+    )
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required for end-to-end parity")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+
+    report = audit(golden, replica_values=replica, engine_values=None)
+
+    # Every cell the replica covers MUST pass.
+    relevant_prefixes = (
+        "status_quo.",
+        "sq_estimation.",
+        "cash_flow.SQ ",
+        "headline.npv_sq_",
+        "detailed_npv.",
+    )
+    cells_covered = [
+        a for a in report.audits
+        if a.label.startswith(relevant_prefixes) and a.replica_passes is not None
+    ]
+    failing = [a for a in cells_covered if a.replica_passes is False]
+
+    assert not failing, (
+        f"{len(failing)} cells failed parity:\n"
+        + "\n".join(
+            f"  {a.label} @ {a.cell_ref}: BA={a.ba_value:,.4f} replica={a.replica_value:,.4f} "
+            f"Δ={a.delta_ab:,.4f} (tol={a.tolerance:,.4f})"
+            for a in failing[:10]
+        )
+    )
+
+    # Replica must cover Status Quo (~231) + Cash Flow (33) + headlines (2) + NPV (7) = 273
+    assert len(cells_covered) >= 270, (
+        f"Replica covers only {len(cells_covered)} cells, expected ≥270"
+    )
+
+
+def test_sq_npv_matches_workbook_anchors(golden):
+    """
+    Defensive: hard-coded NPV anchors for Customer A must match exactly.
+
+    These values were independently verified by hand from the Customer A
+    workbook to prevent silent drift in the NPV math.
+    """
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+    )
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_status_quo_cash_flow_dict(client, bm)
+
+    # Customer A SQ NPV anchors (frozen from finalised workbook)
+    assert replica["headline.npv_sq_10y"] == pytest.approx(96_257_591.60, abs=1.0)
+    assert replica["headline.npv_sq_5y"] == pytest.approx(53_803_461.30, abs=1.0)
+    assert replica["detailed_npv.terminal_value_10y_raw"] == pytest.approx(
+        389_295_573.73, abs=10.0
+    )
+    assert replica["detailed_npv.wacc"] == pytest.approx(0.07, abs=1e-9)
+    assert replica["detailed_npv.perpetual_growth_rate"] == pytest.approx(0.03, abs=1e-9)

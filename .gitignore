@@ -47,3 +47,4 @@ training/baselines/*/replica_per_vm_l2.yaml
 # Layer 3 probe & smoke scripts — debug helpers, not part of production
 scripts/_probe_layer3_*.py
 scripts/_smoke_layer3_*.py
+scripts/_l3_*.py
