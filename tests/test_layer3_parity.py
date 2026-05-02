@@ -705,3 +705,108 @@ def test_full_layer3_oracle_replica_clean_customer_a(golden):
         f"{report.replica_unknown_count} unknown of {report.total_cells}"
     )
     assert report.replica_pass_count == 395
+
+
+# ---------------------------------------------------------------------------
+# Step 11 — Engine bridge: 3-way audit (BA / Replica / Engine)
+# ---------------------------------------------------------------------------
+#
+# This is the trust harness for Steps 12-14. It runs the engine bridge against
+# the SAME oracle the replica is pinned to, and tracks the engine drift count
+# as a monotonically-non-increasing counter.
+#
+# Replica must remain CLEAN (any regression blocks merge).
+# Engine drift must be <= MAX_ENGINE_DRIFT (ratchet — only improves over time).
+#
+# When Step 12 fixes engine bugs, lower MAX_ENGINE_DRIFT and re-commit.
+# ---------------------------------------------------------------------------
+
+# Initial baseline measured 1 May 2026 against Customer A workbook with the
+# engine pipeline as-shipped. Step 12 work must DECREASE this number.
+MAX_ENGINE_DRIFT = 212
+
+
+def test_engine_bridge_covers_all_oracle_cells_customer_a(golden):
+    """
+    The engine bridge must populate ALL 395 oracle keys. Missing keys would be
+    a bridge bug, not an engine bug, so they must be zero.
+    """
+    from training.replicas.engine_bridge_l3 import compute_engine_layer3_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+
+    engine = compute_engine_layer3_dict(client, bm, cons)
+
+    report = audit(golden, replica_values=None, engine_values=engine)
+    assert report.engine_unknown_count == 0, (
+        f"Engine bridge missing {report.engine_unknown_count} keys; "
+        "every oracle key must be populated."
+    )
+    assert report.total_cells == 395
+
+
+def test_engine_drift_does_not_exceed_baseline_customer_a(golden):
+    """
+    Three-way audit (BA / Replica / Engine) — the Step 11 trust scorecard.
+
+    Asserts:
+      1. Replica MUST remain CLEAN (zero failing cells, full coverage).
+         Any regression there is a contract violation and blocks merge.
+      2. Engine drift MUST NOT exceed ``MAX_ENGINE_DRIFT``. As Step 12 fixes
+         engine bugs, lower this constant and commit. The test is a one-way
+         ratchet — engine drift can only go DOWN.
+    """
+    from training.replicas.engine_bridge_l3 import compute_engine_layer3_dict
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+
+    # Build the locked replica dict (must be CLEAN against the oracle).
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+    replica.update(compute_project_npv_dict(client, bm, cons))
+
+    # Build the engine bridge dict (drift here is what Step 12 must reduce).
+    engine = compute_engine_layer3_dict(client, bm, cons)
+
+    report = audit(golden, replica_values=replica, engine_values=engine)
+    v = verdict(report)
+
+    # Trust contract: replica must remain clean.
+    assert v.replica_clean, (
+        f"Replica regression — {report.replica_fail_count} failing, "
+        f"{report.replica_unknown_count} unknown of {report.total_cells}"
+    )
+
+    # Engine drift ratchet — only allowed to decrease over time.
+    assert report.engine_fail_count <= MAX_ENGINE_DRIFT, (
+        f"Engine drift increased: {report.engine_fail_count} > "
+        f"MAX_ENGINE_DRIFT ({MAX_ENGINE_DRIFT}). Fix the engine OR raise the "
+        "ratchet only if the increase is intentional."
+    )
+    pass
