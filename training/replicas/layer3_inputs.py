@@ -56,6 +56,7 @@ class InputsClient:
     workload_name: str
     nb_vms: float
     nb_physical_servers: float
+    total_vms_and_servers_combined: float  # D41 = VMs + physical servers (excl. VM hosts) — used for migration cost
     allocated_vcpu: float
     allocated_pcores: float
     allocated_vmem_gb: float
@@ -226,6 +227,8 @@ def load_client_inputs(workbook_path: str | Path) -> InputsClient:
         nb_vms=_f(cv["D39"]),
         # D40 is "excl. VM hosts" (often 0); D42 is "incl. VM hosts" (the BA-canonical number)
         nb_physical_servers=_f(cv["D42"]),
+        # D41 is the BA's "Total VM's and physical servers combined" — used directly in migration formula.
+        total_vms_and_servers_combined=_f(cv["D41"]),
         allocated_vcpu=_f(cv["D44"]),
         allocated_pcores=_f(cv["D47"]),
         allocated_vmem_gb=_f(cv["D49"]),

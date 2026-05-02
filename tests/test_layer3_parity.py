@@ -407,3 +407,134 @@ def test_sq_npv_matches_workbook_anchors(golden):
     )
     assert replica["detailed_npv.wacc"] == pytest.approx(0.07, abs=1e-9)
     assert replica["detailed_npv.perpetual_growth_rate"] == pytest.approx(0.03, abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Azure Case + retained costs replica (Customer A workbook)
+# ---------------------------------------------------------------------------
+
+
+def test_az_case_replica_perfect_parity_customer_a(golden):
+    """
+    The Azure Case cash-flow + retained-costs replica MUST match Customer A's
+    workbook exactly across all AZ-side cells (CAPEX/OPEX/Consumption/Migration/
+    MS Funding/Total + Savings/Delta/Rate + AZ NPV scalars).
+
+    101 cells total; any drift breaks the trust chain feeding into Project NPV
+    and the displayed ROI/Payback in Step 10.
+    """
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required for end-to-end parity")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+
+    report = audit(golden, replica_values=replica, engine_values=None)
+
+    # Every AZ-side cell the replica covers MUST pass.
+    az_prefixes = (
+        "cash_flow.AZ ",
+        "cash_flow.Savings",
+        "cash_flow.CF Delta",
+        "cash_flow.CF Rate",
+        "headline.npv_az_",
+    )
+    az_cells = [
+        a for a in report.audits
+        if a.label.startswith(az_prefixes) and a.replica_passes is not None
+    ]
+    failing = [a for a in az_cells if a.replica_passes is False]
+
+    assert not failing, (
+        f"{len(failing)} Azure-case cells failed parity:\n"
+        + "\n".join(
+            f"  {a.label} @ {a.cell_ref}: BA={a.ba_value:,.4f} replica={a.replica_value:,.4f} "
+            f"Δ={a.delta_ab:,.4f} (tol={a.tolerance:,.4f})"
+            for a in failing[:10]
+        )
+    )
+
+    # 9 series × 11 years + 2 NPV scalars = 101 AZ cells expected
+    assert len(az_cells) >= 99, (
+        f"Replica covers only {len(az_cells)} AZ cells, expected ≥99"
+    )
+
+
+def test_az_case_replica_keys_match_extractor_labels():
+    """
+    Defensive: replica AZ keys must align EXACTLY with the auditor's
+    expected labels. Drift here would cause silent NOT-IMPLEMENTED.
+    """
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_azure_case_dict(client, bm, cons)
+
+    expected_labels = {
+        f"cash_flow.{line}.Y{yr}"
+        for line in [
+            "AZ CAPEX", "AZ OPEX", "AZ Consumption", "AZ Migration",
+            "AZ MS Funding", "AZ Total CF", "Savings (SQ-AZ)",
+            "CF Delta (AZ-SQ)", "CF Rate",
+        ]
+        for yr in range(11)
+    } | {"headline.npv_az_10y", "headline.npv_az_5y"}
+
+    missing = expected_labels - set(replica.keys())
+    assert not missing, f"Replica missing labels: {sorted(missing)[:5]}..."
+
+
+def test_az_npv_matches_workbook_anchors(golden):
+    """Defensive: hard-coded NPV AZ anchors for Customer A must match."""
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_azure_case_dict(client, bm, cons)
+
+    assert replica["headline.npv_az_10y"] == pytest.approx(
+        golden.headline.npv_az_10y.value, abs=1.0
+    )
+    assert replica["headline.npv_az_5y"] == pytest.approx(
+        golden.headline.npv_az_5y.value, abs=1.0
+    )
+    # Customer A: AZ Total CF Y0 = SQ Total CF Y0 = 12,311,615.42
+    assert replica["cash_flow.AZ Total CF.Y0"] == pytest.approx(12_311_615.42, abs=0.01)
+    assert replica["cash_flow.AZ Total CF.Y10"] == pytest.approx(13_123_084.33, abs=0.01)
+    # Savings, delta, rate at Y10
+    assert replica["cash_flow.Savings (SQ-AZ).Y10"] == pytest.approx(1_995_190.38, abs=0.01)
+    assert replica["cash_flow.CF Rate.Y10"] == pytest.approx(-0.13, abs=0.01)
