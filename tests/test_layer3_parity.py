@@ -538,3 +538,170 @@ def test_az_npv_matches_workbook_anchors(golden):
     # Savings, delta, rate at Y10
     assert replica["cash_flow.Savings (SQ-AZ).Y10"] == pytest.approx(1_995_190.38, abs=0.01)
     assert replica["cash_flow.CF Rate.Y10"] == pytest.approx(-0.13, abs=0.01)
+
+
+# ---------------------------------------------------------------------------
+# Project NPV / 5Y CF Payback replica (Customer A workbook) — closes the oracle
+# ---------------------------------------------------------------------------
+
+
+def test_project_npv_replica_perfect_parity_customer_a(golden):
+    """
+    Project NPV + 5Y CF Payback replica MUST match Customer A's workbook
+    exactly across all remaining 21 cells (12 headline scalars + 9 five_payback
+    scalars).
+
+    Together with Steps 7-9 this lifts replica coverage to 395/395 = 100% of
+    the Layer 3 oracle.
+    """
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required for end-to-end parity")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+    replica.update(compute_project_npv_dict(client, bm, cons))
+
+    report = audit(golden, replica_values=replica, engine_values=None)
+    v = verdict(report)
+
+    failing = [a for a in report.audits if a.replica_passes is False]
+    assert v.replica_clean and not failing, (
+        f"{len(failing)} cells failed parity:\n"
+        + "\n".join(
+            f"  {a.label} @ {a.cell_ref}: BA={a.ba_value:,.4f} replica={a.replica_value:,.4f} "
+            f"Δ={a.delta_ab:,.4f} (tol={a.tolerance:,.4f})"
+            for a in failing[:10]
+        )
+    )
+
+    # 100% coverage — replica should match all 395 oracle cells.
+    assert report.total_cells == 395
+    assert report.replica_unknown_count == 0, (
+        f"Replica should cover all 395 cells, but {report.replica_unknown_count} are uncovered"
+    )
+    assert report.replica_pass_count == 395
+
+
+def test_project_npv_replica_keys_match_extractor_labels():
+    """
+    Defensive: replica project-NPV / five-payback keys must align exactly with
+    the auditor's expected labels.
+    """
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_project_npv_dict(client, bm, cons)
+
+    expected_labels = {
+        "headline.terminal_value_10y", "headline.terminal_value_5y",
+        "headline.project_npv_with_tv_10y", "headline.project_npv_with_tv_5y",
+        "headline.project_npv_excl_tv_10y", "headline.project_npv_excl_tv_5y",
+        "headline.roi_5y_cf", "headline.payback_years",
+        "headline.y10_savings_10y_cf", "headline.y10_savings_5y_cf",
+        "headline.y10_savings_rate_10y", "headline.y10_savings_rate_5y",
+        "five_payback.infra_cost_reduction_npv",
+        "five_payback.infra_admin_reduction_npv",
+        "five_payback.total_benefits_npv",
+        "five_payback.incremental_azure_npv",
+        "five_payback.migration_npv",
+        "five_payback.total_costs_npv",
+        "five_payback.net_benefits_npv",
+        "five_payback.roi_5y_cf",
+        "five_payback.payback_years",
+    }
+    missing = expected_labels - set(replica.keys())
+    assert not missing, f"Replica missing labels: {sorted(missing)}"
+
+
+def test_project_npv_anchors_customer_a(golden):
+    """Hard-coded anchors verified by hand from the finalised Customer A workbook."""
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+    replica = compute_project_npv_dict(client, bm, cons)
+
+    # Customer A frozen anchors (Summary Financial Case + 5Y CF Payback)
+    assert replica["headline.terminal_value_10y"] == pytest.approx(26_117_030.61, abs=1.0)
+    assert replica["headline.project_npv_with_tv_10y"] == pytest.approx(28_686_900.27, abs=1.0)
+    assert replica["headline.project_npv_excl_tv_10y"] == pytest.approx(2_569_869.66, abs=1.0)
+    assert replica["headline.project_npv_excl_tv_5y"] == pytest.approx(-1_793_194.08, abs=1.0)
+    assert replica["headline.roi_5y_cf"] == pytest.approx(-0.4703, abs=0.0001)
+    assert replica["headline.payback_years"] == pytest.approx(0.0, abs=0.001)
+    assert replica["five_payback.net_benefits_npv"] == pytest.approx(-1_793_194.08, abs=1.0)
+    assert replica["five_payback.migration_npv"] == pytest.approx(-4_246_500.0, abs=0.01)
+    assert replica["five_payback.total_benefits_npv"] == pytest.approx(43_294_028.26, abs=1.0)
+
+
+def test_full_layer3_oracle_replica_clean_customer_a(golden):
+    """
+    Top-level smoke: end-to-end Customer A replica must be CLEAN against the
+    full 395-cell oracle. This is the trust-anchor for downstream engine work
+    (Steps 11-14).
+    """
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import compute_status_quo_cash_flow_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_A_WORKBOOK.exists():
+        pytest.skip("Customer A workbook required for end-to-end parity")
+
+    client = load_client_inputs(str(CUSTOMER_A_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_A_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_A_WORKBOOK))
+
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+    replica.update(compute_project_npv_dict(client, bm, cons))
+
+    report = audit(golden, replica_values=replica, engine_values=None)
+    v = verdict(report)
+
+    assert v.replica_clean, (
+        f"Replica is not clean: {report.replica_fail_count} fail, "
+        f"{report.replica_unknown_count} unknown of {report.total_cells}"
+    )
+    assert report.replica_pass_count == 395
