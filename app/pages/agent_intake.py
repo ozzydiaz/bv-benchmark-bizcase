@@ -20,7 +20,7 @@ import zipfile
 import streamlit as st
 import plotly.graph_objects as go
 
-from engine.models import BenchmarkConfig, MIGRATION_RAMP_PRESETS
+from engine.models import BenchmarkConfig, MIGRATION_RAMP_PRESETS, YesNo
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -633,6 +633,77 @@ def _render_l2_override() -> None:
                 st.session_state["_l2_result"] = result
                 st.session_state["benchmarks"]  = bm_new
                 st.rerun()
+
+    # ----------------------------------------------------------------
+    # Backup / DR scope-inclusion (lives outside the rerun block —
+    # toggling these doesn't require re-running Layer 2; only Layer 3
+    # picks them up via cp.backup_* / cp.dr_* fields)
+    # ----------------------------------------------------------------
+    cp_now = l2["cp"]
+    with st.expander("🛡️ Backup & DR scope inclusion", expanded=False):
+        st.caption(
+            "Default for the agent flow is **disabled** (BA workbook D58/D60 = 0). "
+            "Toggle on if backup/DR storage and/or software costs should be carried in the "
+            "Azure consumption side of the case. Storage size is read from Layer 1 inventory "
+            "(0 = no backup/DR storage modelled). Changes apply to Layer 3 on next compute."
+        )
+        bk_col, dr_col = st.columns(2)
+        with bk_col:
+            st.markdown("**Backup**")
+            backup_on  = st.checkbox(
+                "Activate backup",
+                value=(cp_now.backup_activated == YesNo.YES),
+                key="_l2ov_backup_on",
+            )
+            backup_str = st.checkbox(
+                "Backup storage in Azure consumption",
+                value=(cp_now.backup_storage_in_consumption == YesNo.YES),
+                key="_l2ov_backup_str",
+                disabled=not backup_on,
+                help="If on, backup-storage cost is added to the Azure consumption side.",
+            )
+            backup_sw  = st.checkbox(
+                "Backup software in Azure consumption",
+                value=(cp_now.backup_software_in_consumption == YesNo.YES),
+                key="_l2ov_backup_sw",
+                disabled=not backup_on,
+                help="If on, backup-software licence is added to the Azure consumption side.",
+            )
+        with dr_col:
+            st.markdown("**Disaster Recovery**")
+            dr_on  = st.checkbox(
+                "Activate DR",
+                value=(cp_now.dr_activated == YesNo.YES),
+                key="_l2ov_dr_on",
+            )
+            dr_str = st.checkbox(
+                "DR storage in Azure consumption",
+                value=(cp_now.dr_storage_in_consumption == YesNo.YES),
+                key="_l2ov_dr_str",
+                disabled=not dr_on,
+                help="If on, DR-storage cost is added to the Azure consumption side.",
+            )
+            dr_sw  = st.checkbox(
+                "DR software in Azure consumption",
+                value=(cp_now.dr_software_in_consumption == YesNo.YES),
+                key="_l2ov_dr_sw",
+                disabled=not dr_on,
+                help="If on, DR-software licence is added to the Azure consumption side.",
+            )
+
+        if st.button("💾 Apply backup/DR scope to Layer 3", key="_apply_bk_dr"):
+            new_cp = cp_now.model_copy(update={
+                "backup_activated":               YesNo.YES if backup_on  else YesNo.NO,
+                "backup_storage_in_consumption":  YesNo.YES if (backup_on and backup_str) else YesNo.NO,
+                "backup_software_in_consumption": YesNo.YES if (backup_on and backup_sw)  else YesNo.NO,
+                "dr_activated":                   YesNo.YES if dr_on      else YesNo.NO,
+                "dr_storage_in_consumption":      YesNo.YES if (dr_on and dr_str) else YesNo.NO,
+                "dr_software_in_consumption":     YesNo.YES if (dr_on and dr_sw)  else YesNo.NO,
+            })
+            st.session_state["_l2_result"] = {**l2, "cp": new_cp}
+            _clear_from(3)
+            st.success("Backup/DR scope updated. Re-run Layer 3 below.")
+            st.rerun()
 
 # ─── Layer 3 — Financial Model ────────────────────────────────────────────────
 
