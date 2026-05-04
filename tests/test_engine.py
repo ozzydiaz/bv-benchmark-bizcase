@@ -118,6 +118,61 @@ class TestStatusQuo:
         sq = status_quo.compute(contoso_inputs, default_benchmarks)
         assert sq.system_admin_staff[1] > 0
 
+    def test_pmemory_invariant_d49_d50_d52(self, contoso_inputs, default_benchmarks):
+        """BA workbook physical-memory reconciliation: D52 = D49 × ratio + D52_residual.
+
+        The BA workbook ``Status Quo Estimation!J10`` is the total physical
+        memory in GiB across the fleet. It is built from three cells the BA
+        sees on the ``Customer Information`` tab:
+
+            D49 = vMemory provisioned (GiB)         → ``wl.allocated_vmemory_gb``
+            D50 = engine-derived pMemory (GiB)      → ``D49 × bm.vmem_to_pmem_ratio``
+            D52 = host residual pMemory (GiB)       → ``wl.allocated_pmemory_gb_excl_hosts``
+
+            Total pMemory (J10) = D50 + D52
+
+        This invariant is **surfaced in the L1 UI** at
+        ``app/pages/agent_intake.py`` (Step 13c). It is also the multiplier
+        that scales every server-acquisition cost via
+        ``status_quo._server_acquisition_cost``. If this reconciliation breaks
+        (e.g. someone refactors the channels into a single field, or the
+        ratio is silently swapped to 1.0), every CapEx number in the case
+        is wrong by ~the ratio. We codify the relationship as a regression
+        guard so a future "simplification" cannot regress it silently.
+        """
+        wl = contoso_inputs.workloads[0]
+        bm = default_benchmarks
+
+        d49 = wl.allocated_vmemory_gb
+        d50 = d49 * bm.vmem_to_pmem_ratio
+        d52 = wl.allocated_pmemory_gb_excl_hosts
+        expected_total_pmem = d50 + d52
+
+        # Recompute the same way ``status_quo._server_acquisition_cost`` does
+        # so a refactor of that function will fail this test.
+        from engine.status_quo import _server_acquisition_cost
+        sa_cost = _server_acquisition_cost(wl, bm)
+
+        # Solve for pmem the function used: cost = pcores*server_cost_per_core + pmem*server_cost_per_gb_memory
+        pcores = wl.est_allocated_pcores_incl_hosts
+        implied_pmem = (sa_cost - pcores * bm.server_cost_per_core) / bm.server_cost_per_gb_memory
+
+        # Tight tolerance — this is exact arithmetic, not a percentage.
+        assert abs(implied_pmem - expected_total_pmem) < 1.0, (
+            f"pMemory reconciliation broken: D50+D52={expected_total_pmem:,.1f} GiB "
+            f"but server_acquisition_cost implies {implied_pmem:,.1f} GiB. "
+            f"Inputs: D49={d49:,.1f}, ratio={bm.vmem_to_pmem_ratio}, D52_residual={d52:,.1f}."
+        )
+
+        # Defensive: ratio guard. If someone accidentally sets vmem_to_pmem_ratio
+        # outside the documented BA-template envelope, the entire CapEx side
+        # silently shifts. Default benchmark ratio is 1.0 in benchmarks_default.yaml.
+        assert 0.3 <= bm.vmem_to_pmem_ratio <= 1.5, (
+            f"vmem_to_pmem_ratio={bm.vmem_to_pmem_ratio} is outside the "
+            f"documented BA-template envelope [0.3, 1.5]. If you intended to "
+            f"change this, update benchmarks_default.yaml AND re-baseline parity."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Depreciation
