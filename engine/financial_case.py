@@ -268,11 +268,23 @@ def _azure_consumption_by_year(
 
 
 def _migration_costs_by_year(inputs: BusinessCaseInputs) -> list[float]:
-    """Net migration costs (gross cost + Microsoft funding) by year."""
+    """Net migration costs (gross cost + Microsoft funding) by year.
+
+    BA workbook semantics (1-Client Variables ``D41 = SUM(D39:D40)``):
+    Migration cost is per-VM (D39) plus any explicitly-entered non-host
+    physical servers (D40). For the bridge path, ``num_physical_servers_excl_hosts``
+    is a topology residual computed as ``D42 - D39/K11`` (to make Server
+    CAPEX hit BA's D42 figure) -- it is NOT a literal D40 entry. Using it
+    here would double-count the same hardware that's already implicit in
+    the VM workload migration. Match BA semantics: count VMs only.
+
+    For RVTools input, ``num_physical_servers_excl_hosts`` is hard-set to
+    0 by ``rvtools_to_inputs`` so this matches as well.
+    """
     gross = [0.0] * (YEARS + 1)
     funding = [0.0] * (YEARS + 1)
     for cp in inputs.consumption_plans:
-        total_vms = sum(wl.total_vms_and_physical for wl in inputs.workloads)
+        total_vms = sum(wl.num_vms for wl in inputs.workloads)
         ramp_prev = 0.0
         for yr in range(1, YEARS + 1):
             ramp_this = cp.migration_ramp_pct[yr - 1]
