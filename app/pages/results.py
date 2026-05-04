@@ -181,6 +181,24 @@ def render():
     client = inputs.engagement.client_name
     st.header(f"Business Case — {client}")
 
+    # Engine audit-trail banner
+    with st.expander(
+        "🔬 Engine audit trail — version, parity & method notes",
+        expanded=False,
+    ):
+        st.markdown(
+            "- **Engine version:** `v1.5.0-layer3-zero-drift`\n"
+            "- **Layer 3 parity:** 0 cells drift vs BA workbook (Customer A baseline; "
+            "29/29 parity tests passing).\n"
+            f"- **WACC:** {bm.wacc:.2%}  ·  **Perpetual growth (Gordon g):** {bm.perpetual_growth_rate:.2%}\n"
+            "- **CF NPV** = Σ (SQ_total_cf − Az_total_cf) discounted at WACC. "
+            "**P&L NPV** adds Gordon Growth terminal value `TV = savings[10]·(1+g)/(WACC−g)`.\n"
+            "- **Azure pricing:** PAYG list × flat ACD (`ConsumptionPlan.azure_consumption_discount`). "
+            "RI/SP per-VM blending is on the v1.7 backlog.\n"
+            "- **Payback:** first year cumulative (SQ−Az) cash-flow turns non-negative; "
+            "‘N/A’ means break-even is beyond the 10Y window."
+        )
+
     # ================================================================
     # Tabs: Exec Summary | Cash Flow | P&L | Fact Check
     # ================================================================

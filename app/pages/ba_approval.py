@@ -59,6 +59,16 @@ def render() -> None:
     cols[1].metric("ACR RI-3y (USD/yr)", f"${agg['acr_ri3y_usd_yr']:,.0f}")
     cols[2].metric("Disk PAYG (USD/yr)", f"${agg['storage_payg_usd_yr']:,.0f}")
 
+    st.info(
+        "ℹ️ **Pricing offer used in the financial case (Layer 3):** "
+        "the Layer-3 engine currently uses **PAYG list price × flat ACD** "
+        "(`ConsumptionPlan.azure_consumption_discount`) for the entire fleet. "
+        "The **ACR RI-3y** column above is shown for BA reference only — it does "
+        "not flow into the financial case. Per-VM RI/SP blending (BA cells D163–D166) "
+        "is on the v1.7 backlog; until then, set ACD to the workbook's effective "
+        "blended rate (D156/D157) on the Consumption Plan page."
+    )
+
     if agg.get("vms_with_ba_floor"):
         st.info(
             f"KP.BA_SMALL_VM_FLOOR padded {agg['vms_with_ba_floor']} undersized VMs. "

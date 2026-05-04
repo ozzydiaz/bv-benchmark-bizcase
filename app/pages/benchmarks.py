@@ -46,8 +46,16 @@ def render():
             bm.wacc = _pct("WACC (cost of capital)", bm.wacc, "bm_wacc",
                            help="Discount rate for NPV. Default 7%.")
         with c2:
-            bm.perpetual_growth_rate = _pct("Perpetual Growth Rate", bm.perpetual_growth_rate, "bm_pgr",
-                                             help="Terminal value Gordon Growth Model rate. Default 3%.")
+            bm.perpetual_growth_rate = _pct(
+                "Perpetual Growth Rate (Gordon TV)",
+                bm.perpetual_growth_rate,
+                "bm_pgr",
+                help=(
+                    "Terminal value in the 10-year P&L NPV uses Gordon Growth: "
+                    "TV = savings[10] × (1 + g) / (WACC − g), discounted to PV. "
+                    "Default 3%. WACC must be > g or TV is forced to 0."
+                ),
+            )
         with c3:
             bm.nii_interest_rate = _pct("NII Interest Rate", bm.nii_interest_rate, "bm_nii",
                                          help="Short-term interest rate earned on retained cash. Default 3%.")
