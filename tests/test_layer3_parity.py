@@ -723,7 +723,7 @@ def test_full_layer3_oracle_replica_clean_customer_a(golden):
 
 # Initial baseline measured 1 May 2026 against Customer A workbook with the
 # engine pipeline as-shipped. Step 12 work must DECREASE this number.
-MAX_ENGINE_DRIFT = 212
+MAX_ENGINE_DRIFT = 210
 
 
 def test_engine_bridge_covers_all_oracle_cells_customer_a(golden):

@@ -422,9 +422,28 @@ def compute_engine_layer3_dict(
     # ----------------------------------------------------------------
     # sq_estimation.* — Status Quo Estimation tab scalars (Y0 baseline values)
     # ----------------------------------------------------------------
-    out["sq_estimation.server_acquisition_cost"] = float(sq.server_acquisition[0])
-    out["sq_estimation.storage_acquisition_cost"] = float(sq.storage_acquisition[0])
-    out["sq_estimation.nw_fitout_acquisition_cost"] = float(sq.network_fitout_acquisition[0])
+    # The BA's `Status Quo Estimation!C7/C19/C32` cells contain the RAW one-time
+    # acquisition cost (the price you pay to buy the kit), not the annual
+    # depreciation refresh.  The engine's `sq.server_acquisition[0]` is the
+    # amortized refresh = `raw / depreciation_life_years` (at Y0 with
+    # depr_life == actual_usage_life).  Read the engine's private helper
+    # directly so the oracle key reflects the same RAW number BA writes.
+    num_dcs = inputs.datacenter.num_datacenters_to_exit
+    base_server_acq = sum(
+        engine_status_quo._server_acquisition_cost(wl, benchmarks)
+        for wl in inputs.workloads
+    )
+    base_storage_acq = sum(
+        engine_status_quo._storage_acquisition_cost(wl, benchmarks)
+        for wl in inputs.workloads
+    )
+    base_nw_acq = sum(
+        engine_status_quo._network_fitout_cost(wl, benchmarks, num_dcs)
+        for wl in inputs.workloads
+    )
+    out["sq_estimation.server_acquisition_cost"] = float(base_server_acq)
+    out["sq_estimation.storage_acquisition_cost"] = float(base_storage_acq)
+    out["sq_estimation.nw_fitout_acquisition_cost"] = float(base_nw_acq)
     out["sq_estimation.licenses_yearly_cost"] = float(
         sq.virtualization_licenses[0]
         + sq.windows_server_licenses[0]
@@ -443,23 +462,37 @@ def compute_engine_layer3_dict(
     out["sq_estimation.sysadmin_yearly"] = float(sq.system_admin_staff[0])
 
     # ----------------------------------------------------------------
-    # detailed_npv.* — Detailed Financial Case rows 91-101 (subset)
+    # detailed_npv.* — Detailed Financial Case rows 91-101
     # ----------------------------------------------------------------
-    # The auditor expects a few scalars here. The engine doesn't expose all of
-    # these natively; provide the ones we can derive cleanly.
-    savings_pl = fc.savings()
-    out["detailed_npv.annual_npv_y1"] = (
-        savings_pl[1] / (1 + wacc) ** 1 if len(savings_pl) > 1 else 0.0
-    )
-    out["detailed_npv.annual_npv_y10"] = (
-        savings_pl[10] / (1 + wacc) ** 10 if len(savings_pl) > 10 else 0.0
-    )
-    out["detailed_npv.npv_10y_excl_tv"] = float(summary.npv_10yr)
-    # Terminal value gross (undiscounted): Gordon growth on Y10 P&L savings
-    out["detailed_npv.terminal_value_10y_raw"] = (
-        savings_pl[10] * (1 + perp) / (wacc - perp) if (wacc > perp and len(savings_pl) > 10) else 0.0
-    )
-    out["detailed_npv.npv_with_tv_10y_raw"] = float(summary.npv_10yr_with_terminal_value)
+    # The BA's M91-M98 block is the **Status-Quo perpetual continuation**
+    # display:
+    #   M92 = SQ Total CF for that year      (= row 75)
+    #   M93 = Gordon TV on SQ Y10            (= M92 * (1+g_perp)/(wacc-g_perp))
+    #   M94 = SQ CF discounted to today      (= M92 / (1+wacc)^year)
+    #   M97 = sum of M94 across years        (= NPV of SQ-only stream excl. TV)
+    #   M98 = M94 + M95                       (NPV including TV present-value)
+    # i.e. these scalars use the SQ cash-flow stream, NOT the relative-savings
+    # P&L stream that drives ROI.  (Headline TV / project-NPV are the
+    # relative-savings versions and are mapped above via headline.*.)
+    if len(sq_total_cf) > 10 and wacc > perp:
+        annual_sq_pv = [sq_total_cf[t] / (1 + wacc) ** t for t in range(11)]
+        out["detailed_npv.annual_npv_y1"] = annual_sq_pv[1]
+        out["detailed_npv.annual_npv_y10"] = annual_sq_pv[10]
+        out["detailed_npv.npv_10y_excl_tv"] = sum(annual_sq_pv[t] for t in range(1, 11))
+        # Gordon TV on SQ-only Y10 cash flow (undiscounted)
+        tv_sq_y10_raw = sq_total_cf[10] * (1 + perp) / (wacc - perp)
+        out["detailed_npv.terminal_value_10y_raw"] = tv_sq_y10_raw
+        # NPV with TV: SQ NPV + present-value of TV (discounted from Y10)
+        tv_sq_y10_pv = tv_sq_y10_raw / (1 + wacc) ** 10
+        out["detailed_npv.npv_with_tv_10y_raw"] = (
+            out["detailed_npv.npv_10y_excl_tv"] + tv_sq_y10_pv
+        )
+    else:
+        out["detailed_npv.annual_npv_y1"] = 0.0
+        out["detailed_npv.annual_npv_y10"] = 0.0
+        out["detailed_npv.npv_10y_excl_tv"] = 0.0
+        out["detailed_npv.terminal_value_10y_raw"] = 0.0
+        out["detailed_npv.npv_with_tv_10y_raw"] = 0.0
     out["detailed_npv.wacc"] = float(wacc)
     out["detailed_npv.perpetual_growth_rate"] = float(perp)
 
