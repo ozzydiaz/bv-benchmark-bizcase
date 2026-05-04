@@ -371,11 +371,26 @@ def compute(
         fc.az_system_admin[yr] = retained.system_admin_staff[yr]
 
         # --- Azure Case: cashflow CAPEX (retained hardware acquisition) ---
-        # Scale by M12: on the migration track only hardware_renewal_pct% of due
-        # acquisitions are made (deferring refreshes until migration is complete).
-        fc.az_server_acquisition[yr] = acq_servers[yr] * retained_frac * m12
-        fc.az_storage_acquisition[yr] = acq_storage[yr] * retained_frac * m12
-        fc.az_nw_acquisition[yr] = acq_nw[yr] * retained_frac * m12
+        # Mirrors the BA workbook's Detailed Financial Case row 21-22 ("Retained
+        # CAPEX"):
+        #   Y0     = full Y0 baseline acquisition (pre-migration; nothing has
+        #            migrated yet so the customer still books the full annual
+        #            sustaining hardware spend).
+        #   Y1..Y10 = baseline_y0 × hw_renewal_pct × (1 - eoy_ramp[t])
+        #            (defer refreshes during migration; only the residual
+        #             non-migrated portion needs new hardware).
+        #
+        # Note: BA holds the baseline static (no yearly growth, no
+        # depr/actual_life refresh factor) on this line — only the migration
+        # ramp shapes the year-by-year value.
+        if yr == 0:
+            fc.az_server_acquisition[yr] = acq_servers[0]
+            fc.az_storage_acquisition[yr] = acq_storage[0]
+            fc.az_nw_acquisition[yr] = acq_nw[0]
+        else:
+            fc.az_server_acquisition[yr] = acq_servers[0] * m12 * retained_frac
+            fc.az_storage_acquisition[yr] = acq_storage[0] * m12 * retained_frac
+            fc.az_nw_acquisition[yr] = acq_nw[0] * m12 * retained_frac
 
         # --- Azure Case: Azure-only costs ---
         fc.az_azure_consumption[yr] = az_consumption[yr]
