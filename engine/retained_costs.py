@@ -142,11 +142,25 @@ def compute(
             status_quo.virtualization_licenses[prev_yr] * lagged_fraction
         )
 
-        # ── Windows / SQL Server licenses — BYOL/AHB: SA obligation persists in Azure ──
-        # License renewals are priced at the prior-year pCore count; the obligation
-        # does not disappear when VMs move to Azure (you still pay SA to use AHB).
-        retained.windows_server_licenses[yr] = status_quo.windows_server_licenses[prev_yr]
-        retained.sql_server_licenses[yr]     = status_quo.sql_server_licenses[prev_yr]
+        # ── Windows / SQL Server licenses — BYOL/AHB ──
+        # Behaviour validated against BA workbook 'Retained Costs Estimation'
+        # (replica: layer3_azure_case.py::_az_continuing_license, $0.01 parity).
+        # During the migration ramp, the SA obligation only applies to cores
+        # still on-prem -> cost tapers with the lagged migration ramp:
+        #     multiplier = (1 - eoy[t-1])
+        # Once fully migrated (eoy[t-1] >= 1.0), the customer must continue
+        # to renew SA to keep AHB benefits in Azure -> snap back to full:
+        #     multiplier = 1.0
+        # The 10-nines epsilon mirrors the replica's tolerance for ramp
+        # values that may be 0.99999... instead of exactly 1.0 due to float
+        # accumulation in _combined_ramp().
+        license_multiplier = 1.0 if lagged_ramp >= 0.9999999999 else lagged_fraction
+        retained.windows_server_licenses[yr] = (
+            status_quo.windows_server_licenses[prev_yr] * license_multiplier
+        )
+        retained.sql_server_licenses[yr] = (
+            status_quo.sql_server_licenses[prev_yr] * license_multiplier
+        )
 
         # ── Windows / SQL ESU — 1-year lag; covered free by AHB once in Azure ──
         retained.windows_esu[yr] = status_quo.windows_esu[prev_yr] * lagged_fraction
@@ -156,14 +170,35 @@ def compute(
         retained.backup_software[yr] = status_quo.backup_software[prev_yr] * lagged_fraction
         retained.dr_software[yr]     = status_quo.dr_software[prev_yr]     * lagged_fraction
 
-        # ── IT admin — 1-year lag + D31 productivity floor ──
-        sq_it_prev = status_quo.system_admin_staff[prev_yr]
+        # ── IT admin — per-year integer-rounded sysadmin headcount ──
+        # Mirrors the BA workbook's "Retained Costs Estimation" sysadmin
+        # formula (validated to $0.01 against Customer A):
+        #   sq_admins[t]  = round(VMs × (1+g)^t / vms_per_admin)
+        #   reduced[t]    = round(sq_admins[t] × productivity_reduction
+        #                         × ramp_lagged[t] × productivity_recapture)
+        #   retained[t]   = max(sq_admins[t] - reduced[t], 0)
+        #   cost[t]       = retained[t] × admin_loaded_cost
+        #
+        # The integer rounding causes BA's retained admin count to often
+        # land on a flat step function (e.g. 2 admins all 11 years for
+        # Customer A) — modeled exactly here. Without productivity
+        # incorporation (D31 = "No"), reduced=0 and retained=sq_admins.
+        admin_cost = benchmarks.sysadmin_fully_loaded_cost_yr
+        if admin_cost > 0:
+            sq_admins_t = round(status_quo.system_admin_staff[yr] / admin_cost)
+        else:
+            sq_admins_t = 0
         if inputs.incorporate_productivity_benefit == YesNo.YES:
-            retained.system_admin_staff[yr] = max(
-                sq_it_prev * lagged_fraction, azure_it_floor
+            reduced = round(
+                sq_admins_t
+                * benchmarks.productivity_reduction_after_migration
+                * lagged_ramp
+                * benchmarks.productivity_recapture_rate
             )
         else:
-            retained.system_admin_staff[yr] = sq_it_prev * lagged_fraction
+            reduced = 0
+        retained_admins = max(sq_admins_t - reduced, 0)
+        retained.system_admin_staff[yr] = retained_admins * admin_cost
 
         # ── Backup / DR storage — 1-year lag ──
         # When in Azure Consumption: Y0/Y1 = full on-prem cost (transition period),
