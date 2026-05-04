@@ -88,9 +88,28 @@ def _build_schedule(
             # Forward: grows with rate, refresh factor applied
             acq = annual_baseline_acq * (1 + growth_rate) ** year_offset * (depr_life / max(actual_life, 1))
 
-        depr = acq  # simplified: straight-line, 1-year recognition in the P&L view
         sched.yearly_acquisition[i] = acq
-        sched.yearly_depreciation[i] = annual_baseline_depr * (1 + growth_rate) ** max(0, year_offset)
+
+    # Yearly depreciation = rolling average of yearly_acquisition over the
+    # last `depr_life` columns (matches BA's "Depreciation Schedule" tab):
+    #
+    #   depr[T] = avg(acq[T - depr_life + 1 .. T])
+    #
+    # This causes early forward years to lag the CAPEX growth curve because
+    # the window is dominated by historical (un-grown) acquisitions, which is
+    # exactly what the BA workbook does.
+    #
+    # NOTE: For customers where ``depr_life != actual_life`` the forward-year
+    # CAPEX includes a refresh factor (``depr_life / actual_life``); in that
+    # case the rolling window will inherit it. Customer A has
+    # ``depr_life == actual_life``, so the factor is 1.0 and the result equals
+    # the locked layer-3 replica. If a future customer with mismatched lives
+    # shows drift, this branch should compute the rolling average over a
+    # *raw* CAPEX series (no refresh factor) and apply the factor separately.
+    for i in range(TOTAL_COLS):
+        window_lo = max(0, i - depr_life + 1)
+        window = sched.yearly_acquisition[window_lo : i + 1]
+        sched.yearly_depreciation[i] = sum(window) / max(depr_life, 1)
 
     # Net book value (cumulative: sum of future depreciation remaining)
     cumulative_acq = 0.0
