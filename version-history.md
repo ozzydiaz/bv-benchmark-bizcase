@@ -5,6 +5,45 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## Roadmap (forward backlog — not yet released)
+
+### v1.5.1 — Streamlit polish (in progress, Steps 13a–13f)
+- ✅ **13a** Scenario export — PPTX slide 3 + XLSX `Scenario_Comparison` sheet + hidden `_Audit` sheet (commit `b8d3f4e`)
+- ✅ **13b** L3 advanced — depreciation life + HW renewal + ramp-formula explainer + payback edge-case label (commit `14b4b66`)
+- ✅ **13c** vMemory annotation — BA D49/D50/D52 reconciliation block at L1 checkpoint (commit `e518e66`)
+- ✅ **13d** Backup/DR scope-inclusion checkboxes in L2 override panel (commit `1031f0f`)
+- ✅ **13e** Quick wins — Gordon TV formula help, RI/SP financial-case clarification at BA-Approval Gate, results audit banner (commit `057466e`)
+- ✅ **13f** Per-VM breadcrumb from L2 anomaly list to BA-approval citations (commit `772c74f`)
+- ⬜ **15**  Validate against second customer BA-completed workbook (pending customer-supplied file)
+
+### v1.6 — Configurable Terminal Value (engine refactor, low-risk)
+- Expose `tv_method: "gordon" | "exit_multiple" | "none"` enum on `BenchmarkConfig`. Default stays `"gordon"` so existing customers see no change.
+- Add `tv_floor_at_zero: bool = False` flag — when True, `_terminal_value` returns `max(0, tv)` so a negative-savings perpetuity cannot drag NPV further negative.
+- Surface `perpetual_growth_rate` in the L3 override panel (currently only on benchmarks page) so BAs can sensitivity-test g during scenario building.
+- **Risk:** any change to `engine/outputs.py:_terminal_value` re-opens Layer 3 parity. Must rerun the 29 parity tests against Customer A AND new Customer B (Step 15) before merge. Adversarial Explore review required before any code change.
+- **Trigger:** finish Step 15 with second customer at zero drift first.
+
+### v1.7 — RI/SP-blended Azure pricing (engine refactor, medium-risk)
+- Phase 2 from the May 2026 risk analysis: derive `effective_acd` as a family-blended weighted average from the BA workbook's D156/D157/D163-D166 cells:
+  ```
+  effective_acd = paygo×0
+                + ri_1y×0.20 + ri_3y×0.36
+                + sp_1y×0.18 + sp_3y×0.30
+  ```
+  Algebra unchanged; only the *value* fed to `financial_case.py:260` shifts. Layer 3 parity should hold because the BA workbook already does this rollup in `new_acd`.
+- Opt-in flag `BenchmarkConfig.use_ri_sp_blending: bool = False` until two-customer baseline confirms.
+- **Out of scope (deferred to v2.0):** per-VM RI/SP allocation with Y1 upfront bifurcation. That requires:
+  - Replica upgrade in lock-step with engine
+  - New summary fields: `azure_ri_upfront_y1`, `azure_ri_amortization_by_year`
+  - CF/P&L split in `financial_case.py`
+  - Layer 3 parity re-baseline against **two** customers
+- **Risk:** breaks the "Azure consumption is pure OPEX" invariant the engine currently relies on for `az_total_cf()` vs `az_total()` (P&L). Drift could spike to 200+ cells.
+
+### v2.0 — Per-VM RI/SP allocation (deferred)
+See v1.7 deferred section. Earliest planning after v1.7 ships and is validated.
+
+---
+
 ## v1.5.0 — Layer 3 BA Parity: ZERO ENGINE DRIFT
 **Commits:** `552b106` … `c544441` | **Date:** 2026-05-04 | **Tests:** 29 layer3 parity ✅ + 31 privacy/parity gate ✅
 
