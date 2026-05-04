@@ -143,7 +143,9 @@ def replica_inputs_to_engine_inputs(
     workload = WorkloadInventory(
         workload_name=client.workload_name or "Workload #1",
         num_vms=int(client.nb_vms),
-        num_physical_servers_excl_hosts=int(round(excl_hosts)),
+        # Pass fractional residual verbatim -- engine field is float to match
+        # BA's hand-typed D42. See engine/models.py docstring for rationale.
+        num_physical_servers_excl_hosts=excl_hosts,
         allocated_vcpu=int(client.allocated_vcpu),
         # Additive residual so engine's est_allocated_pcores_incl_hosts == D47.
         allocated_pcores_excl_hosts=pcores_residual,

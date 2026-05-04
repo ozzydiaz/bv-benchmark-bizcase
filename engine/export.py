@@ -396,7 +396,9 @@ def build_excel(
 
     if wl:
         cv["D39"] = wl.num_vms
-        cv["D40"] = wl.num_physical_servers_excl_hosts
+        # D40 is BA's manual integer cell; engine carries a fractional topology
+        # residual (D42 - num_vms/K11). Round to int for Excel display fidelity.
+        cv["D40"] = int(round(wl.num_physical_servers_excl_hosts))
         cv["D44"] = wl.allocated_vcpu
         cv["D49"] = wl.allocated_vmemory_gb
         cv["D54"] = wl.allocated_storage_gb

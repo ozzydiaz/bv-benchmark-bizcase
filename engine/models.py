@@ -97,7 +97,13 @@ class WorkloadInventory(BaseModel):
 
     # VM counts
     num_vms: int = Field(0, ge=0, description="vInfo tab, count of column A")
-    num_physical_servers_excl_hosts: int = Field(0, ge=0)
+    # NOTE: float (not int) because the bridge feeds a topology residual
+    # ``D42 - num_vms / vm_to_server_ratio`` that is fractional for most
+    # customers (e.g. Customer A: 280 - 2831/12 = 44.0833). Rounding to int
+    # truncated 1/12 of a host and propagated as a $1.10 NW+Fitout
+    # depreciation drift. The replica oracle uses the BA's hand-typed D42
+    # directly; the engine must preserve the fractional residual to match.
+    num_physical_servers_excl_hosts: float = Field(0.0, ge=0.0)
 
     # CPU
     allocated_vcpu: int = Field(0, ge=0, description="vInfo tab, sum of column O")
@@ -152,14 +158,19 @@ class WorkloadInventory(BaseModel):
         if self.pcores_with_sql_esu is None:
             self.pcores_with_sql_esu = self.pcores_with_windows_esu * 0.10
         if self.backup_num_protected_vms is None:
-            self.backup_num_protected_vms = self.total_vms_and_physical
+            # round() (not int()) to avoid silent truncation when
+            # num_physical_servers_excl_hosts carries a fractional residual.
+            self.backup_num_protected_vms = int(round(self.total_vms_and_physical))
         if self.dr_num_protected_vms is None:
-            self.dr_num_protected_vms = self.total_vms_and_physical
+            self.dr_num_protected_vms = int(round(self.total_vms_and_physical))
         return self
 
     # Derived fields (computed, not entered)
     @property
-    def total_vms_and_physical(self) -> int:
+    def total_vms_and_physical(self) -> float:
+        # Returns float because num_physical_servers_excl_hosts is a fractional
+        # topology residual. Callers that need an int (e.g. backup/DR VM count
+        # defaults, Excel cell writes) MUST round explicitly with int(round(...)).
         return self.num_vms + self.num_physical_servers_excl_hosts
 
     @property
