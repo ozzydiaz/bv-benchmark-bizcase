@@ -132,20 +132,25 @@ class WorkloadInventory(BaseModel):
     # License inventory
     byol_virtualization_for_avs: YesNo = YesNo.NO
     vcpu_per_core_ratio: float = Field(1.97, description="vHost tab, avg column Y (vCPUs per pCore)")
-    pcores_with_virtualization: Optional[int] = Field(None, ge=0, description="pCores running virtualization SW; defaults to allocated_vcpu / vcpu_per_core_ratio")
-    pcores_with_windows_server: int = Field(0, ge=0, description="vInfo filtered to Windows OS, sum CPU / vcpu_per_core_ratio")
-    pcores_with_windows_esu: int = Field(0, ge=0, description="ESU-eligible Windows (pre-2012)")
-    pcores_with_sql_server: Optional[int] = None   # defaults to 10% of windows_server if None
-    pcores_with_sql_esu: Optional[int] = None       # defaults to 10% of windows_esu if None
+    # NOTE: pcores fields are float (not int) because the BA workbook hand-types
+    # fractional values via formulas like ``=12405/1.48`` (vCPU/pCore-ratio) on
+    # the 1-Client Variables sheet. Per-core licensing rates are applied to the
+    # fractional value verbatim — rounding to int introduces ~1% drift on small
+    # ESU populations. Replica oracle uses fractional values; engine must match.
+    pcores_with_virtualization: Optional[float] = Field(None, ge=0, description="pCores running virtualization SW; defaults to allocated_vcpu / vcpu_per_core_ratio")
+    pcores_with_windows_server: float = Field(0.0, ge=0, description="vInfo filtered to Windows OS, sum CPU / vcpu_per_core_ratio")
+    pcores_with_windows_esu: float = Field(0.0, ge=0, description="ESU-eligible Windows (pre-2012)")
+    pcores_with_sql_server: Optional[float] = None   # defaults to 10% of windows_server if None
+    pcores_with_sql_esu: Optional[float] = None       # defaults to 10% of windows_esu if None
 
     @model_validator(mode="after")
     def derive_defaults(self) -> "WorkloadInventory":
         if self.pcores_with_virtualization is None:
-            self.pcores_with_virtualization = round(self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01))
+            self.pcores_with_virtualization = self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01)
         if self.pcores_with_sql_server is None:
-            self.pcores_with_sql_server = round(self.pcores_with_windows_server * 0.10)
+            self.pcores_with_sql_server = self.pcores_with_windows_server * 0.10
         if self.pcores_with_sql_esu is None:
-            self.pcores_with_sql_esu = round(self.pcores_with_windows_esu * 0.10)
+            self.pcores_with_sql_esu = self.pcores_with_windows_esu * 0.10
         if self.backup_num_protected_vms is None:
             self.backup_num_protected_vms = self.total_vms_and_physical
         if self.dr_num_protected_vms is None:

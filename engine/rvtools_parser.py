@@ -171,13 +171,16 @@ class RVToolsInventory:
     total_host_memory_gb: float = 0.0
     num_hosts: int = 0
 
-    # Windows/SQL pCore estimates — ALL VMs, both OS columns
-    pcores_with_windows_server: int = 0
-    pcores_with_windows_esu: int = 0
+    # Windows/SQL pCore estimates — ALL VMs, both OS columns.
+    # Stored as float to preserve fractional pCore counts derived from
+    # ``vcpus / vcpu_per_core_ratio`` (matches BA workbook 1-Client Variables
+    # sheet which hand-types fractional values via formulas like =12405/1.48).
+    pcores_with_windows_server: float = 0.0
+    pcores_with_windows_esu: float = 0.0
     esu_count_may_be_understated: bool = False
     windows_vms_unknown_version: int = 0  # Windows VMs with no detectable version
-    pcores_with_sql_server: int = 0       # default: 10% of windows; overridden by Application detection
-    pcores_with_sql_esu: int = 0          # default: 10% of windows_esu
+    pcores_with_sql_server: float = 0.0       # default: 10% of windows; overridden by Application detection
+    pcores_with_sql_esu: float = 0.0          # default: 10% of windows_esu
 
     # SQL detection from Application custom attribute (col 77 in vInfo).
     # When sql_vms_detected > 0 it overrides the 10% Windows default above.
@@ -700,11 +703,14 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     # ------------------------------------------------------------------
     # Derive Windows/SQL pCore estimates using the vCPU/core ratio
     # ------------------------------------------------------------------
+    # Note: pCore counts are floats (not rounded). The BA workbook applies the
+    # per-core licensing rate to the fractional value (e.g., 78.85 cores) -
+    # rounding here would re-introduce ~1% drift on small ESU populations.
     ratio = inv.vcpu_per_core_ratio if inv.vcpu_per_core_ratio > 0 else 1.0
     win_vcpus = getattr(inv, "_win_vcpus", 0)
     win_esu_vcpus = getattr(inv, "_win_esu_vcpus", 0)
-    inv.pcores_with_windows_server = round(win_vcpus / ratio)
-    inv.pcores_with_windows_esu = round(win_esu_vcpus / ratio)
+    inv.pcores_with_windows_server = win_vcpus / ratio
+    inv.pcores_with_windows_esu = win_esu_vcpus / ratio
 
     # SQL pCores: prefer Application-detected count; fall back to 10% of Windows
     inv.sql_vms_detected     = sql_vms_all
@@ -713,20 +719,20 @@ def parse(path: str | Path, include_powered_off: bool | None = None) -> RVToolsI
     inv.sql_prod_assumed     = (sql_vms_all > 0 and sql_env_tagged_count == 0)
     inv.lifecycle_env_tags_present = env_all_tagged_count > 0
     if sql_vcpus_all > 0:
-        inv.pcores_with_sql_server = round(sql_vcpus_all / ratio)
+        inv.pcores_with_sql_server = sql_vcpus_all / ratio
         inv.sql_detection_source   = "application"
         # ESU SQL pCores: proportion of SQL pCores relative to total Windows
         win_pcore_total = max(inv.pcores_with_windows_server, 1)
         sql_esu_fraction = inv.pcores_with_windows_esu / win_pcore_total
-        inv.pcores_with_sql_esu = round(inv.pcores_with_sql_server * sql_esu_fraction)
+        inv.pcores_with_sql_esu = inv.pcores_with_sql_server * sql_esu_fraction
         prod_note = "assumed prod — no env tags" if inv.sql_prod_assumed else f"{sql_prod_all} Prod / {sql_nonprod_all} non-Prod"
         _log.debug(
             f"[rvtools_parser] SQL detection (Application): "
-            f"{sql_vms_all} VMs → {inv.pcores_with_sql_server} pCores  ({prod_note})"
+            f"{sql_vms_all} VMs → {inv.pcores_with_sql_server:.2f} pCores  ({prod_note})"
         )
     else:
-        inv.pcores_with_sql_server = round(inv.pcores_with_windows_server * 0.10)
-        inv.pcores_with_sql_esu    = round(inv.pcores_with_windows_esu * 0.10)
+        inv.pcores_with_sql_server = inv.pcores_with_windows_server * 0.10
+        inv.pcores_with_sql_esu    = inv.pcores_with_windows_esu * 0.10
         inv.sql_detection_source   = "default"
 
     # Clean up private attrs

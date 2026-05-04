@@ -160,11 +160,14 @@ def replica_inputs_to_engine_inputs(
         vm_to_server_ratio=bm.vm_to_physical_server_ratio,
         byol_virtualization_for_avs=_yesno(client.byol_virtualization),
         vcpu_per_core_ratio=client.vcpu_per_pcore_ratio or 1.97,
-        pcores_with_virtualization=int(client.pcores_with_virtualization),
-        pcores_with_windows_server=int(client.pcores_with_windows_server),
-        pcores_with_windows_esu=int(client.pcores_with_windows_server_esu),
-        pcores_with_sql_server=int(client.pcores_with_sql_server),
-        pcores_with_sql_esu=int(client.pcores_with_sql_server_esu),
+        # Pass fractional pCore counts verbatim — BA workbook hand-types
+        # fractional values (e.g., =12405/1.48 = 8381.756...) and the per-core
+        # licensing rate applies to the fractional value, not a rounded int.
+        pcores_with_virtualization=float(client.pcores_with_virtualization),
+        pcores_with_windows_server=float(client.pcores_with_windows_server),
+        pcores_with_windows_esu=float(client.pcores_with_windows_server_esu),
+        pcores_with_sql_server=float(client.pcores_with_sql_server),
+        pcores_with_sql_esu=float(client.pcores_with_sql_server_esu),
     )
 
     # ---- Consumption plan ----
