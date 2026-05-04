@@ -77,6 +77,7 @@ def render():
 
     inputs  = st.session_state["inputs"]
     bm: BenchmarkConfig = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
+    scenarios = st.session_state.get("_l3_scenarios", []) or []
 
     with st.spinner("Running engine…"):
         sq   = status_quo.compute(inputs, bm)
@@ -86,6 +87,13 @@ def render():
         summary = outputs.compute(inputs, bm, fc)
 
     client = inputs.engagement.client_name
+
+    if scenarios:
+        st.info(
+            f"🔀 **{len(scenarios)} alternate scenario(s) detected.** "
+            f"They will be included as Slide 3 of the deck and a `Scenario_Comparison` sheet of the workbook. "
+            f"Base scenario: workbook recalculates from the yellow cells."
+        )
 
     tab_dl, tab_slides, tab_detail = st.tabs(["📥 Downloads", "🖥️ Presentation View", "📋 Detail Table"])
 
@@ -100,14 +108,17 @@ def render():
         # --- PowerPoint ---
         with col_pptx:
             st.markdown("#### PowerPoint Deck (.pptx)")
+            slide_count = 3 if scenarios else 2
             st.caption(
-                "2-slide deck: **Slide 1** — KPI cards + dual 5Y/10Y "
+                f"{slide_count}-slide deck: **Slide 1** — KPI cards + dual 5Y/10Y "
                 "stacked bar+line charts.  **Slide 2** — Annual cashflow table "
                 "and savings waterfall."
+                + (f"  **Slide 3** — side-by-side scenario grid ({len(scenarios)} alternates)." if scenarios else "")
+                + "  Speaker notes contain the formula and source citations."
             )
             with st.spinner("Building PowerPoint…"):
                 try:
-                    pptx_bytes = build_pptx(summary, fc, inputs, bm)
+                    pptx_bytes = build_pptx(summary, fc, inputs, bm, scenarios=scenarios)
                     st.download_button(
                         label="⬇️ Download PowerPoint",
                         data=pptx_bytes,
@@ -133,17 +144,25 @@ def render():
         # --- Excel ---
         with col_xlsx:
             st.markdown("#### Pre-Filled Excel Workbook (.xlsx)")
-            st.caption(
+            xlsx_caption = (
                 "The BV Benchmark Business Case template with all yellow input cells "
                 "pre-filled from this session's inputs. Open in Excel and press "
                 "**Ctrl+Alt+F9** to recalculate — results should match the Step 4 output."
             )
+            if scenarios:
+                xlsx_caption += (
+                    f"  A **Scenario_Comparison** sheet is appended with {len(scenarios)} alternate scenario(s) "
+                    "as values-only KPIs. A hidden **_Audit** sheet records engine version and parity status."
+                )
+            else:
+                xlsx_caption += "  A hidden **_Audit** sheet records engine version and parity status."
+            st.caption(xlsx_caption)
             import pathlib
             template_path = "Template_BV Benchmark Business Case v6.xlsm"
             if pathlib.Path(template_path).exists():
                 with st.spinner("Building Excel workbook…"):
                     try:
-                        xlsx_bytes = build_excel(inputs, bm, template_path)
+                        xlsx_bytes = build_excel(inputs, bm, template_path, scenarios=scenarios)
                         st.download_button(
                             label="⬇️ Download Excel",
                             data=xlsx_bytes,

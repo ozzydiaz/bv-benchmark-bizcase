@@ -5,21 +5,29 @@ Export the business case to PowerPoint (.pptx) and pre-filled Excel (.xlsx).
 
 PowerPoint output
 -----------------
-Two slides:
+Two or three slides:
   Slide 1 — Executive Summary (KPI cards + dual 5Y/10Y stacked-bar+line chart)
   Slide 2 — Detailed Financial Case (annual cashflow table + cumulative savings)
+  Slide 3 — Scenario Comparison (only when scenarios=[…] is supplied)
 
 Excel output
 ------------
 Writes the engine's computed inputs back into a copy of the BV Benchmark
 Business Case template, filling every yellow input cell so the workbook
 produces the same results as the Python engine when opened and saved.
+When scenarios=[…] is supplied a `Scenario_Comparison` sheet is appended
+with one column per scenario and headline KPIs as rows.
 
 Usage
 -----
 >>> from engine.export import build_pptx, build_excel
->>> pptx_bytes = build_pptx(summary, fc, inputs, benchmarks)
->>> xlsx_bytes = build_excel(inputs, benchmarks)
+>>> pptx_bytes = build_pptx(summary, fc, inputs, benchmarks, scenarios=alts)
+>>> xlsx_bytes = build_excel(inputs, benchmarks, scenarios=alts)
+
+A scenario is a dict with at least:
+  {"label": str, "summary": BusinessCaseSummary,
+   "aco": list[float], "ecif": list[float], "num_dc_exit": int}
+Base scenario is rendered automatically from the positional `summary`.
 """
 from __future__ import annotations
 
@@ -188,9 +196,10 @@ def build_pptx(
     fc: "FinancialCase",
     inputs: "BusinessCaseInputs",
     benchmarks: "BenchmarkConfig",
+    scenarios: "list[dict] | None" = None,
 ) -> bytes:
     """
-    Build a 2-slide PowerPoint deck and return as bytes.
+    Build a PowerPoint deck and return as bytes.
 
     Slide 1 — Executive Summary
       • KPI cards: CF NPV 10Y / CF NPV 5Y / P&L NPV 10Y / ROI 10Y / Payback / Yr10 Savings
@@ -349,10 +358,125 @@ def build_pptx(
         _add_textbox(s2, x_pos, y_pos, 3.1, 0.28,
                      f"{cat}: ${val:,.0f}/yr", font_size=8, color=col)
 
+    # ==================================================================
+    # SLIDE 3 — Scenario Comparison (only when alts supplied)
+    # ==================================================================
+    if scenarios:
+        _add_scenario_slide(prs, blank_layout, summary, scenarios, client)
+
+    # ------------------------------------------------------------------
+    # Speaker notes — audit trail for every slide
+    # ------------------------------------------------------------------
+    pb_str_note = f"{summary.payback_years:.1f} yrs" if summary.payback_years else "Does not break even within 10Y"
+    _set_notes(s1,
+        f"Source: BV Benchmark Business Case engine, Layer 3 parity = 0.\n"
+        f"Customer: {client}.\n"
+        f"WACC: {benchmarks.wacc:.1%}; perpetual growth: {benchmarks.perpetual_growth_rate:.1%}.\n"
+        f"CF NPV 10Y = sum of discounted (SQ_total_cf − Azure_total_cf) for Y1–Y10.\n"
+        f"P&L NPV 10Y includes Gordon Growth terminal value: TV = savings[10] × (1+g) / (wacc − g) discounted to PV.\n"
+        f"ROI 10Y = NPV (incl. TV) / NPV of Azure 10Y costs.\n"
+        f"Payback: {pb_str_note}.")
+    _set_notes(s2,
+        "Annual Cash Flow Detail — raw CF series Y1–Y10 used for CF NPV and Payback.\n"
+        "SQ Total CF = on-prem retained costs (no migration). Azure Total CF = retained CAPEX + retained OPEX + Azure consumption + migration.\n"
+        "Cumulative Savings = running sum of (SQ − Azure). Break-even year = first non-negative cumulative.\n"
+        "Waterfall is P&L basis (depreciated CAPEX) averaged over 10Y — not CF.")
+
     buf = io.BytesIO()
     prs.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _set_notes(slide, text: str) -> None:
+    """Attach speaker notes to a slide for export-time audit trail."""
+    try:
+        notes_tf = slide.notes_slide.notes_text_frame
+        notes_tf.text = text
+    except Exception:
+        pass  # notes are best-effort
+
+
+def _add_scenario_slide(prs, blank_layout, base_summary, scenarios: list[dict], client: str) -> None:
+    """
+    Slide 3 — Scenario comparison grid.
+
+    Renders Base + up to 3 alternative scenarios side-by-side as columns of
+    KPI cards. If more than 3 alternates are supplied only the first 3 are
+    shown; a footer flags the truncation.
+    """
+    s = prs.slides.add_slide(blank_layout)
+    _add_rect(s, 0, 0, 13.33, 7.5, _C_DARK_BG)
+    _add_rect(s, 0, 0, 13.33, 0.55, _C_AZ)
+    _add_textbox(s, 0.15, 0.08, 10, 0.40, f"{client} — Scenario Comparison",
+                 font_size=18, bold=True)
+    _add_textbox(s, 9.0, 0.12, 4.0, 0.30, f"{1 + len(scenarios)} scenarios",
+                 font_size=11, color=_C_WHITE, align="right")
+
+    cols: list[tuple[str, object, dict]] = [("Base", base_summary, {})]
+    for sc in scenarios[:3]:
+        cols.append((sc.get("label", "Alt"), sc.get("summary"), sc))
+
+    n_cols = len(cols)
+    col_w = (13.33 - 0.30) / n_cols
+    kpi_top = 0.85
+
+    kpi_rows = [
+        ("5-Yr CF ROI",     lambda s_: f"{s_.roi_cf:.0%}",                                        "Cash-flow ROI over 5Y horizon"),
+        ("Payback (5Y CF)", lambda s_: (f"{s_.payback_cf:.1f} yrs" if s_.payback_cf else ">5 yrs"), "Cash-flow break-even"),
+        ("CF NPV (5-Yr)",   lambda s_: f"${s_.npv_cf_5yr:,.0f}",                                  "Cash-flow NPV"),
+        ("CF NPV (10-Yr)",  lambda s_: f"${s_.npv_cf_10yr:,.0f}",                                 "Cash-flow NPV"),
+        ("P&L NPV (10-Yr)", lambda s_: f"${s_.npv_10yr:,.0f}",                                    "Depreciated basis incl. TV"),
+        ("Yr-10 Savings",   lambda s_: f"${s_.savings_yr10:,.0f}",                                "Annual run-rate savings"),
+        ("Azure $/VM/yr",   lambda s_: f"${s_.azure_cost_per_vm_yr:,.0f}",                        "Year 10 Azure unit cost"),
+    ]
+    card_h = 0.78
+
+    for col_i, (label, sm, sc_meta) in enumerate(cols):
+        left = 0.15 + col_i * col_w
+        accent = _C_AZ if col_i == 0 else _C_GREEN
+        _add_rect(s, left, kpi_top, col_w - 0.10, 0.06, accent)
+        _add_rect(s, left, kpi_top + 0.06, col_w - 0.10, 0.45, _C_PANEL)
+        _add_textbox(s, left + 0.05, kpi_top + 0.10, col_w - 0.20, 0.30,
+                     label, font_size=12, bold=True, color=_C_WHITE, align="center")
+
+        if sm is None:
+            _add_textbox(s, left + 0.05, kpi_top + 0.55, col_w - 0.20, 0.30,
+                         "(no summary)", font_size=9, color=_C_GREY, align="center")
+            continue
+
+        for row_i, (rlabel, fn, sub) in enumerate(kpi_rows):
+            top = kpi_top + 0.55 + row_i * (card_h + 0.04)
+            _add_rect(s, left, top, col_w - 0.10, card_h, _C_PANEL)
+            _add_textbox(s, left + 0.05, top + 0.04, col_w - 0.20, 0.20,
+                         rlabel, font_size=7, color=_C_GREY)
+            try:
+                value = fn(sm)
+            except Exception:
+                value = "—"
+            _add_textbox(s, left + 0.05, top + 0.22, col_w - 0.20, 0.34,
+                         value, font_size=14, bold=True, color=_C_WHITE)
+            _add_textbox(s, left + 0.05, top + 0.55, col_w - 0.20, 0.20,
+                         sub, font_size=6, color=_C_GREY)
+
+        if sc_meta:
+            aco_total  = sum(abs(x) for x in sc_meta.get("aco", []) or [])
+            ecif_total = sum(abs(x) for x in sc_meta.get("ecif", []) or [])
+            dc         = sc_meta.get("num_dc_exit", 0)
+            footer     = f"DC exit: {dc} · ACO: ${aco_total:,.0f} · ECIF: ${ecif_total:,.0f}"
+            _add_textbox(s, left + 0.05, 7.05, col_w - 0.20, 0.25,
+                         footer, font_size=7, color=_C_GREY)
+
+    if len(scenarios) > 3:
+        _add_textbox(s, 0.15, 7.30, 13.0, 0.18,
+                     f"⚠ {len(scenarios) - 3} additional scenario(s) omitted from slide for layout. "
+                     f"All {1 + len(scenarios)} scenarios are exported in the Scenario_Comparison sheet of the XLSX.",
+                     font_size=7, color=_C_AMBER)
+
+    _set_notes(s,
+        f"Scenario grid — {1 + len(scenarios)} scenarios (Base + {len(scenarios)} alt).\n"
+        "All KPIs computed by the same Layer-3 engine; only WACC, ACO, ECIF and DC-exit differ across columns.\n"
+        "Engine drift vs BA workbook: 0 cells (Customer A baseline).")
 
 
 # ---------------------------------------------------------------------------
@@ -363,6 +487,7 @@ def build_excel(
     inputs: "BusinessCaseInputs",
     benchmarks: "BenchmarkConfig",
     template_path: "str | Path | None" = None,
+    scenarios: "list[dict] | None" = None,
 ) -> bytes:
     """
     Write engine inputs into the BV Benchmark workbook template yellow cells
@@ -372,9 +497,14 @@ def build_excel(
     Cells written: 1-Client Variables (D9, D10, D24, D25, D26, D39, D44, D49,
     D54, D66, D67, D68) + 2a-Consumption Plan (D8, D9, D10, E17:N17, E21:N21,
     E22:N22).
+
+    When `scenarios` is supplied, an extra `Scenario_Comparison` sheet is
+    appended with one column per scenario and headline KPIs as rows. The
+    base inputs are still written to the template's yellow cells so the
+    workbook recalculates the **base** scenario when opened in Excel; the
+    Scenario_Comparison sheet is values-only (no formulas).
     """
     import openpyxl
-    from copy import deepcopy
 
     resolved = Path(template_path) if template_path else _TEMPLATE_PATH
     wb = openpyxl.load_workbook(resolved, keep_vba=False, data_only=False)
@@ -421,7 +551,130 @@ def build_excel(
             cp[f"{col}21"] = plan.aco_by_year[i]
             cp[f"{col}22"] = plan.ecif_by_year[i]
 
+    # ------------------------------------------------------------------
+    # Scenario comparison sheet (values-only)
+    # ------------------------------------------------------------------
+    if scenarios:
+        _write_scenario_sheet(wb, scenarios, benchmarks)
+
+    # Audit-metadata sheet — engine version + drift status
+    _write_audit_sheet(wb, inputs, benchmarks, scenarios)
+
     buf = io.BytesIO()
     wb.save(buf)
     buf.seek(0)
     return buf.read()
+
+
+def _write_scenario_sheet(wb, scenarios: list[dict], benchmarks: "BenchmarkConfig") -> None:
+    """
+    Append a `Scenario_Comparison` sheet listing all alternate scenarios
+    side-by-side. Values only (no formulas) — Excel cannot re-derive these
+    from yellow cells because the BA template only models a single scenario.
+    """
+    sheet_name = "Scenario_Comparison"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+
+    # Header
+    ws.cell(row=1, column=1, value="KPI / Source")
+    ws.cell(row=1, column=2, value="Base (workbook)")
+    for col_i, sc in enumerate(scenarios, start=3):
+        ws.cell(row=1, column=col_i, value=sc.get("label", f"Scenario {col_i - 2:02d}"))
+
+    rows = [
+        ("5-Yr CF ROI",          lambda s_: s_.roi_cf,                "0.0%"),
+        ("Payback (5Y CF, yrs)", lambda s_: s_.payback_cf if s_.payback_cf else None, "0.00"),
+        ("CF NPV (5-Yr)",        lambda s_: s_.npv_cf_5yr,            "$#,##0"),
+        ("CF NPV (10-Yr)",       lambda s_: s_.npv_cf_10yr,           "$#,##0"),
+        ("P&L NPV (5-Yr)",       lambda s_: s_.npv_5yr,               "$#,##0"),
+        ("P&L NPV (10-Yr)",      lambda s_: s_.npv_10yr,              "$#,##0"),
+        ("Yr-10 Annual Savings", lambda s_: s_.savings_yr10,          "$#,##0"),
+        ("Azure Cost / VM / yr", lambda s_: s_.azure_cost_per_vm_yr,  "$#,##0"),
+        ("On-Prem Cost / VM / yr", lambda s_: s_.on_prem_cost_per_vm_yr, "$#,##0"),
+        ("Savings / VM / yr",    lambda s_: s_.savings_per_vm_yr,     "$#,##0"),
+        ("Total SQ CF (10Y)",    lambda s_: s_.total_sq_cf_10yr,      "$#,##0"),
+        ("Total Az CF (10Y)",    lambda s_: s_.total_az_cf_10yr,      "$#,##0"),
+    ]
+
+    # Helper: extract summary; column 2 has no scenario object
+    def _summary_for(col_i: int):
+        if col_i == 2:
+            # Base column is intentionally blank — workbook will recalculate
+            # from the yellow cells when opened in Excel.
+            return None
+        sc = scenarios[col_i - 3]
+        return sc.get("summary")
+
+    for row_i, (label, fn, fmt) in enumerate(rows, start=2):
+        ws.cell(row=row_i, column=1, value=label)
+        for col_i in range(2, 3 + len(scenarios)):
+            sm = _summary_for(col_i)
+            if sm is None:
+                ws.cell(row=row_i, column=col_i, value="(see workbook recalc)")
+            else:
+                try:
+                    val = fn(sm)
+                except Exception:
+                    val = None
+                cell = ws.cell(row=row_i, column=col_i, value=val)
+                if val is not None and isinstance(val, (int, float)):
+                    cell.number_format = fmt
+
+    # Scenario metadata footer
+    meta_row = 2 + len(rows) + 1
+    ws.cell(row=meta_row,     column=1, value="— Scenario inputs —").font = ws.cell(row=meta_row, column=1).font.copy(bold=True)
+    ws.cell(row=meta_row + 1, column=1, value="WACC")
+    ws.cell(row=meta_row + 2, column=1, value="DC exits")
+    ws.cell(row=meta_row + 3, column=1, value="ACO total (abs)")
+    ws.cell(row=meta_row + 4, column=1, value="ECIF total (abs)")
+    ws.cell(row=meta_row + 1, column=2, value=benchmarks.wacc)
+    ws.cell(row=meta_row + 1, column=2).number_format = "0.00%"
+    for col_i, sc in enumerate(scenarios, start=3):
+        # Per-scenario WACC isn't preserved on the dict; show base wacc unless
+        # caller stuffs a `wacc` key on the scenario dict.
+        ws.cell(row=meta_row + 1, column=col_i, value=sc.get("wacc", benchmarks.wacc)).number_format = "0.00%"
+        ws.cell(row=meta_row + 2, column=col_i, value=sc.get("num_dc_exit", 0))
+        ws.cell(row=meta_row + 3, column=col_i,
+                value=sum(abs(x) for x in (sc.get("aco")  or []))).number_format = "$#,##0"
+        ws.cell(row=meta_row + 4, column=col_i,
+                value=sum(abs(x) for x in (sc.get("ecif") or []))).number_format = "$#,##0"
+
+    # Column widths
+    from openpyxl.utils import get_column_letter
+    ws.column_dimensions[get_column_letter(1)].width = 26
+    for col_i in range(2, 3 + len(scenarios)):
+        ws.column_dimensions[get_column_letter(col_i)].width = 22
+
+
+def _write_audit_sheet(wb, inputs, benchmarks, scenarios) -> None:
+    """Hidden audit-trail sheet — engine version, parity status, key benchmarks."""
+    sheet_name = "_Audit"
+    if sheet_name in wb.sheetnames:
+        del wb[sheet_name]
+    ws = wb.create_sheet(sheet_name)
+    ws.sheet_state = "hidden"
+
+    rows = [
+        ("Engine version",                "v1.5.0-layer3-zero-drift"),
+        ("Layer 3 parity",                "0 cells drift vs BA workbook (Customer A baseline)"),
+        ("WACC (discount rate)",          benchmarks.wacc),
+        ("Perpetual growth (Gordon g)",   benchmarks.perpetual_growth_rate),
+        ("Inflation rate",                getattr(benchmarks, "inflation_rate", None)),
+        ("Customer",                      inputs.engagement.client_name),
+        ("Currency",                      inputs.engagement.local_currency_name),
+        ("Workloads modelled",            len(inputs.workloads)),
+        ("Consumption plans modelled",    len(inputs.consumption_plans)),
+        ("Scenarios in this export",      1 + (len(scenarios) if scenarios else 0)),
+        ("Notes",
+         "TV: Gordon Growth on P&L savings[10] (see version-history.md for v1.6/v1.7 backlog). "
+         "Azure pricing: PAYG list, single flat ACD. RI/SP blending deferred to v1.7."),
+    ]
+    for r, (label, val) in enumerate(rows, start=1):
+        ws.cell(row=r, column=1, value=label)
+        ws.cell(row=r, column=2, value=val)
+
+    from openpyxl.utils import get_column_letter
+    ws.column_dimensions[get_column_letter(1)].width = 32
+    ws.column_dimensions[get_column_letter(2)].width = 60
