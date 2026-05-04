@@ -116,8 +116,11 @@ def compute_cf_roi_and_payback(
     not achieved within 5 years (Template: "More than 5 years").
     """
     wacc   = benchmarks.wacc
-    sq_pl  = fc.sq_total()
-    az_pl  = fc.az_total()
+    # BA's "5Y CF with Payback" sheet is CASH FLOW (capex+opex), not P&L
+    # (depreciation+opex). Use the *_cf accessors so the ROI/payback computed
+    # here matches the workbook's I31/I32 cells.
+    sq_cf  = fc.sq_total_cf()
+    az_cf  = fc.az_total_cf()
     mig    = fc.az_migration_cf()
 
     # C40: NPV of one-time migration investment (positive magnitude)
@@ -128,10 +131,10 @@ def compute_cf_roi_and_payback(
     if investment_npv <= 0:
         return 0.0, 0.0
 
-    # Ongoing run savings = SQ P&L cost − Azure ongoing P&L (migration excluded)
+    # Ongoing run savings = SQ cash cost − Azure ongoing cash (migration excluded)
     run_savings = [
-        sq_pl[yr] - (az_pl[yr] - mig[yr])
-        for yr in range(len(sq_pl))
+        sq_cf[yr] - (az_cf[yr] - mig[yr])
+        for yr in range(len(sq_cf))
     ]
 
     # C46…G46: cumulative discounted run savings through Y1…Y5

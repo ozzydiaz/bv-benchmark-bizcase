@@ -421,8 +421,11 @@ def compute_engine_layer3_dict(
     sq_admin = fc.sq_system_admin
     az_admin = fc.az_system_admin
 
-    def _disc_5y(series: list[float]) -> float:
-        return sum(series[yr] / (1 + wacc) ** yr for yr in range(1, 6) if yr < len(series))
+    def _sum_y1_y5(series: list[float]) -> float:
+        # BA's "5Y CF with Payback" breakdown column H is the UNDISCOUNTED Y1..Y5
+        # raw sum (e.g. migration_npv = -1,698,600 + -2,547,900 = -4,246,500).
+        # Replica `layer3_project_npv.py` computes these as `sum(series_y1_y5)`.
+        return sum(series[yr] for yr in range(1, 6) if yr < len(series))
 
     # Infra savings (excl IT admin) NPV
     sq_infra = [sq_capex[yr] + sq_opex[yr] - sq_admin[yr] for yr in range(n)]
@@ -436,13 +439,15 @@ def compute_engine_layer3_dict(
     total_costs = [incremental_azure[yr] + migration[yr] for yr in range(n)]
     net_benefits = [total_benefits[yr] + total_costs[yr] for yr in range(n)]
 
-    out["five_payback.infra_cost_reduction_npv"] = _disc_5y(infra_savings)
-    out["five_payback.infra_admin_reduction_npv"] = _disc_5y(infra_admin_savings)
-    out["five_payback.total_benefits_npv"] = _disc_5y(total_benefits)
-    out["five_payback.incremental_azure_npv"] = _disc_5y(incremental_azure)
-    out["five_payback.migration_npv"] = _disc_5y(migration)
-    out["five_payback.total_costs_npv"] = _disc_5y(total_costs)
-    out["five_payback.net_benefits_npv"] = _disc_5y(net_benefits)
+    out["five_payback.infra_cost_reduction_npv"] = _sum_y1_y5(infra_savings)
+    out["five_payback.infra_admin_reduction_npv"] = _sum_y1_y5(infra_admin_savings)
+    out["five_payback.total_benefits_npv"] = _sum_y1_y5(total_benefits)
+    out["five_payback.incremental_azure_npv"] = _sum_y1_y5(incremental_azure)
+    out["five_payback.migration_npv"] = _sum_y1_y5(migration)
+    out["five_payback.total_costs_npv"] = _sum_y1_y5(total_costs)
+    # net_benefits_npv is the only label in this block that is DISCOUNTED -- it
+    # equals headline.project_npv_excl_tv_5y = NPV_SQ[5] - NPV_AZ[5].
+    out["five_payback.net_benefits_npv"] = npv_sq_5y - npv_az_5y
     out["five_payback.roi_5y_cf"] = float(summary.roi_cf)
     out["five_payback.payback_years"] = float(summary.payback_cf or 0.0)
 
