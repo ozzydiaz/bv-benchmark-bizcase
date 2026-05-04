@@ -121,18 +121,37 @@ def replica_inputs_to_engine_inputs(
     derived_hosts = float(client.nb_vms) / max(bm.vm_to_physical_server_ratio, 0.01)
     excl_hosts = max(0.0, incl_hosts - derived_hosts)
 
+    # CPU/memory totals — match the BA's hand-typed D47 and D52 cells.
+    #
+    # BA's `Status Quo Estimation!J11` reads `'1-Client Variables'!D47` and
+    # `D52` directly (the user types the GRAND TOTAL pcores and pmemory). The
+    # engine prefers RVtools-style derivation: `allocated_vcpu /
+    # vcpu_per_core_ratio + allocated_pcores_excl_hosts` for pcores, and
+    # `allocated_vmemory_gb * vmem_to_pmem_ratio + allocated_pmemory_gb_excl_hosts`
+    # for pmem. To make the engine's output match BA's hand-typed totals, we
+    # use the additive `*_excl_hosts` channel as a residual:
+    #     residual = TOTAL - derived  (clamped to >= 0)
+    # This preserves the field's documented semantics (additive non-VM source)
+    # and stays compatible with the RVtools path (which fills the same field
+    # with hypervisor host pcores/memory).
+    vcpu_ratio = client.vcpu_per_pcore_ratio or 1.97
+    derived_pcores = float(client.allocated_vcpu) / max(vcpu_ratio, 0.01)
+    pcores_residual = max(0, round(client.allocated_pcores - derived_pcores))
+    derived_pmem = client.allocated_vmem_gb * bm.vmem_to_pmem_ratio
+    pmem_residual = max(0.0, client.allocated_pmem_gb - derived_pmem)
+
     workload = WorkloadInventory(
         workload_name=client.workload_name or "Workload #1",
         num_vms=int(client.nb_vms),
         num_physical_servers_excl_hosts=int(round(excl_hosts)),
         allocated_vcpu=int(client.allocated_vcpu),
-        # Engine derives total pCores via `allocated_vcpu / vcpu_per_core_ratio +
-        # allocated_pcores_excl_hosts`. For Customer A all servers are VM hosts
-        # so the excl-hosts contribution is 0; the BA's D47 total comes out of the
-        # vcpu-to-pcore conversion. Step 12 will tighten this if needed.
-        allocated_pcores_excl_hosts=0,
+        # Additive residual so engine's est_allocated_pcores_incl_hosts == D47.
+        allocated_pcores_excl_hosts=pcores_residual,
         allocated_vmemory_gb=client.allocated_vmem_gb,
-        allocated_pmemory_gb_excl_hosts=0.0,
+        # Additive residual so engine's pmem_gb in _server_acquisition_cost == D52.
+        # NOTE: requires engine fix in `_server_acquisition_cost` to actually
+        # consume this field (was previously ignored — RVtools path bug).
+        allocated_pmemory_gb_excl_hosts=pmem_residual,
         allocated_storage_gb=client.allocated_storage_gb,
         backup_size_gb=client.backup_size_gb or None,
         backup_num_protected_vms=int(client.backup_protected_vms) if client.backup_protected_vms else None,

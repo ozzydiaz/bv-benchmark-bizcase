@@ -82,9 +82,23 @@ class StatusQuoCosts:
 
 
 def _server_acquisition_cost(wl: WorkloadInventory, bm: BenchmarkConfig) -> float:
-    """Total server hardware acquisition cost for one workload (USD)."""
+    """Total server hardware acquisition cost for one workload (USD).
+
+    Mirrors the BA workbook ``Status Quo Estimation!J11`` formula:
+        ``J11 = J9 * K14 + J10 * K15``
+    where ``J9`` is the total physical cores and ``J10`` is the total
+    physical memory in GiB across the fleet (including any non-VM hosts).
+
+    Both ``allocated_pcores_excl_hosts`` and ``allocated_pmemory_gb_excl_hosts``
+    are *additive* channels for capacity that is not derivable from the VM
+    inventory (e.g. hypervisor host pcores from RVtools, or hand-typed totals
+    from the BA workbook's D47/D52 cells via the engine bridge).
+    """
     pcores = wl.est_allocated_pcores_incl_hosts
-    pmem_gb = wl.allocated_vmemory_gb * bm.vmem_to_pmem_ratio
+    pmem_gb = (
+        wl.allocated_vmemory_gb * bm.vmem_to_pmem_ratio
+        + wl.allocated_pmemory_gb_excl_hosts
+    )
     return pcores * bm.server_cost_per_core + pmem_gb * bm.server_cost_per_gb_memory
 
 
