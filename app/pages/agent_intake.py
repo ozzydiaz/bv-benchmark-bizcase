@@ -620,7 +620,12 @@ def _build_l3_inputs(
             local_currency_name=l1["currency"],
             usd_to_local_rate=1.0,
         ),
-        hardware=HardwareLifecycle(),
+        hardware=HardwareLifecycle(
+            depreciation_life_years=int(st.session_state.get("_l3ov_depr_life", 5)),
+            hardware_renewal_during_migration_pct=float(
+                st.session_state.get("_l3ov_hw_renewal", 0.10)
+            ),
+        ),
         datacenter=DatacenterConfig(num_datacenters_to_exit=num_dc_exit),
         workloads=[l2["wl"]],
         consumption_plans=[cp],
@@ -671,7 +676,11 @@ def _show_layer3(horizon: int = 5) -> None:
         cols = st.columns(len(all_sc))
         for col, sc in zip(cols, all_sc):
             s   = sc["summary"]
-            pb  = f"{s.payback_cf:.1f} yrs" if s.payback_cf else ">5 yrs"
+            pb  = (
+                f"{s.payback_cf:.1f} yrs"
+                if s.payback_cf
+                else ">5 yrs (no break-even)"
+            )
             aco = sum(abs(x) for x in sc.get("aco", []))
             col.subheader(sc["label"])
             col.metric("5-Yr CF ROI",    f"{s.roi_cf:.0%}")
@@ -683,7 +692,11 @@ def _show_layer3(horizon: int = 5) -> None:
                 col.metric("ACO Credits", fmt(aco), delta="in base", delta_color="off")
     else:
         summary = l3["summary"]
-        pb_str  = f"{summary.payback_cf:.1f} yrs" if summary.payback_cf else ">5 yrs"
+        pb_str  = (
+            f"{summary.payback_cf:.1f} yrs"
+            if summary.payback_cf
+            else ">5 yrs (no break-even)"
+        )
         st.markdown("##### Business Case Summary")
         k1, k2, k3, k4, k5, k6 = st.columns(6)
         npv_cf = summary.npv_cf_10yr if horizon >= 10 else summary.npv_cf_5yr
@@ -762,6 +775,67 @@ def _render_l3_override() -> None:
             horizontal=True, key="_l3ov_horizon",
         )
         st.session_state["_agent_horizon"] = 5 if "5" in horizon_sel else 10
+
+        # ---------- Hardware lifecycle (advanced) ----------
+        with st.expander("🔧 Hardware lifecycle (advanced)", expanded=False):
+            hl1, hl2, hl3 = st.columns(3)
+            hl1.number_input(
+                "Depreciation life (yrs)",
+                min_value=1, max_value=10,
+                value=int(st.session_state.get("_l3ov_depr_life", 5)),
+                step=1,
+                key="_l3ov_depr_life",
+                help=(
+                    "Server hardware depreciation period for the P&L. "
+                    "BA workbook D24. Lower = faster CAPEX run-off → bigger early "
+                    "P&L savings; CF series is unaffected."
+                ),
+            )
+            hl2.slider(
+                "HW renewal during migration %",
+                min_value=0, max_value=50,
+                value=int(round(float(st.session_state.get("_l3ov_hw_renewal", 0.10)) * 100)),
+                step=5,
+                key="_l3ov_hw_renewal_pct",
+                help=(
+                    "Fraction of on-prem hardware that gets refreshed mid-migration. "
+                    "BA workbook D27. 10% = default. 0% = aggressive sweat-the-asset; "
+                    "30%+ = phased decommission with refresh of survivors."
+                ),
+            )
+            # Mirror slider value (0–50) → fractional float for engine
+            st.session_state["_l3ov_hw_renewal"] = (
+                st.session_state.get("_l3ov_hw_renewal_pct", 10) / 100.0
+            )
+            hl3.markdown(
+                f"<small>Perpetual growth rate (Gordon TV): "
+                f"<b>{bm.perpetual_growth_rate:.1%}</b><br/>"
+                f"Adjust in <i>Step 3 · Benchmark Assumptions</i>.</small>",
+                unsafe_allow_html=True,
+            )
+
+        # ---------- Migration ramp formula explainer ----------
+        with st.expander("📐 Migration ramp & formulas", expanded=False):
+            st.markdown(
+                "**Migration ramp (default 40% / 80% / 100%):** EOY cumulative % of "
+                "on-prem fleet migrated. Yearly Azure consumption = "
+                "`(ramp_y_end + ramp_(y-1)_end) / 2 × full_run_rate × (1 + g)^(y-1) × (1 − ACD)`. "
+                "Migration cost = `(ramp_y_end − ramp_(y-1)_end) × num_vms × cost_per_vm`."
+            )
+            st.markdown(
+                "**Cash-flow NPV (CF basis):** "
+                "`Σ (SQ_total_cf[y] − Az_total_cf[y]) / (1 + WACC)^y`  for y = 1..N."
+            )
+            st.markdown(
+                "**P&L NPV (incl. terminal value):** "
+                "`Σ savings_pl[y] / (1+WACC)^y  +  TV / (1+WACC)^N`, "
+                "with `TV = savings_pl[N] × (1 + g) / (WACC − g)` (Gordon Growth). "
+                "Guard: if WACC ≤ g then TV = 0."
+            )
+            st.markdown(
+                "**Payback (CF basis):** first year where running cumulative "
+                "(SQ_cf − Az_cf) crosses zero. ‘>5 yrs (no break-even)’ if it never does."
+            )
 
         st.markdown("**Microsoft Funding Credits** *(positive = inflow to client)*")
         cr1, cr2, cr3, cr4, cr5 = st.columns(5)
