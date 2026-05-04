@@ -358,11 +358,13 @@ def compute_engine_layer3_dict(
         out[f"cash_flow.AZ Migration.Y{yr}"] = float(az_migration[yr])
         out[f"cash_flow.AZ MS Funding.Y{yr}"] = float(az_funding[yr])
         out[f"cash_flow.AZ Total CF.Y{yr}"] = float(az_total_cf[yr])
-        out[f"cash_flow.Savings (SQ-AZ).Y{yr}"] = float(savings_cf[yr])
+        # Savings (SQ-AZ): BA's display floors at zero (no "negative savings")
+        out[f"cash_flow.Savings (SQ-AZ).Y{yr}"] = float(max(0.0, savings_cf[yr]))
         # CF Delta = AZ - SQ (negative when Azure is cheaper)
         out[f"cash_flow.CF Delta (AZ-SQ).Y{yr}"] = float(az_total_cf[yr] - sq_total_cf[yr])
-        # CF Rate = (SQ - AZ) / SQ (saving rate)
-        rate = (sq_total_cf[yr] - az_total_cf[yr]) / sq_total_cf[yr] if sq_total_cf[yr] else 0.0
+        # CF Rate = (AZ - SQ) / SQ -- BA's sign convention: positive when Azure
+        # costs more than status quo, negative when Azure saves.
+        rate = (az_total_cf[yr] - sq_total_cf[yr]) / sq_total_cf[yr] if sq_total_cf[yr] else 0.0
         out[f"cash_flow.CF Rate.Y{yr}"] = float(rate)
 
     # ----------------------------------------------------------------
@@ -402,12 +404,15 @@ def compute_engine_layer3_dict(
     out["headline.roi_5y_cf"] = float(summary.roi_cf)
     out["headline.payback_years"] = float(summary.payback_cf or 0.0)
 
-    # Y10 savings + savings rate
-    y10_savings = sq_total_cf[10] - az_total_cf[10] if len(sq_total_cf) > 10 else 0.0
+    # Y10 / Y5 savings + savings rate
+    # NOTE: BA's headline labels are labeled "savings" but use the (AZ - SQ) sign
+    # convention -- negative means Azure saves vs status quo. Match the workbook.
+    y10_savings = az_total_cf[10] - sq_total_cf[10] if len(sq_total_cf) > 10 else 0.0
+    y5_savings = az_total_cf[5] - sq_total_cf[5] if len(sq_total_cf) > 5 else 0.0
     out["headline.y10_savings_10y_cf"] = float(y10_savings)
-    out["headline.y10_savings_5y_cf"] = float(y10_savings)  # same number, both anchors share Y10
+    out["headline.y10_savings_5y_cf"] = float(y5_savings)
     out["headline.y10_savings_rate_10y"] = float(y10_savings / sq_total_cf[10]) if sq_total_cf[10] else 0.0
-    out["headline.y10_savings_rate_5y"] = out["headline.y10_savings_rate_10y"]
+    out["headline.y10_savings_rate_5y"] = float(y5_savings / sq_total_cf[5]) if sq_total_cf[5] else 0.0
 
     # ----------------------------------------------------------------
     # five_payback.* — 5Y CF with Payback sheet (engine's compute_cf_roi_and_payback)
