@@ -511,6 +511,22 @@ def _show_layer2() -> None:
             ):
                 import pandas as pd
                 st.dataframe(pd.DataFrame(rv.anomaly_vms[:20]), use_container_width=True)
+                anomaly_names = sorted({
+                    str(a.get("vm") or a.get("name") or "")
+                    for a in rv.anomaly_vms[:20]
+                    if a.get("vm") or a.get("name")
+                })
+                if anomaly_names:
+                    st.caption(
+                        "🔗 To inspect the citation chain for any of these VMs, "
+                        "open **Step 2.5 · BA Approval Gate** and pick the VM in the "
+                        "*Per-VM citation drill-down* selector. The gate ties each "
+                        "right-sizing decision to the verbatim R&D-slide formula."
+                    )
+                    st.code(
+                        "Anomalous VMs:\n" + "\n".join(f"  • {n}" for n in anomaly_names[:20]),
+                        language="text",
+                    )
 
     st.markdown("##### Azure Cost Estimate (PAYG list price, Y10 run-rate)")
     m1, m2, m3, m4 = st.columns(4)
