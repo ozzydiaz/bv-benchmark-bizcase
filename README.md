@@ -2,6 +2,14 @@
 
 Automates the BV Benchmark Business Case Excel workbook (v6) as a Python engine + Streamlit application. Upload an RVtools export and the engine **automatically derives** on-premises inventory, right-sizes Azure targets per VM using SKU-matched GiB-accurate Azure consumption, infers the deployment region, fetches live Azure Retail Prices API pricing, and produces a validated on-premises TCO vs. Azure migration financial case: NPV, ROI, payback, and full 10-year P&L.
 
+> **Layer 3 BA parity verified (v1.5.0):** the engine matches the BA workbook
+> **exactly** across all **395/395 oracle keys** for the Customer A reference
+> workbook. `MAX_ENGINE_DRIFT = 0` is locked into the parity test
+> ([`tests/test_layer3_parity.py`](tests/test_layer3_parity.py)) — any future
+> regression is a hard CI fail. See
+> [version-history.md](version-history.md#v150--layer-3-ba-parity-zero-engine-drift)
+> for the 212 → 0 drift ratchet.
+
 The only inputs a seller needs to provide are:
 - RVtools `.xlsx` export  
 - Client name + currency  

@@ -5,6 +5,66 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ---
 
+## v1.5.0 — Layer 3 BA Parity: ZERO ENGINE DRIFT
+**Commits:** `552b106` … `c544441` | **Date:** 2026-05-04 | **Tests:** 29 layer3 parity ✅ + 31 privacy/parity gate ✅
+
+### What changed
+
+The engine now **matches the BA workbook exactly** across all 395 Layer 3 oracle
+keys for the Customer A reference workbook. **`MAX_ENGINE_DRIFT = 0`** is locked
+into `tests/test_layer3_parity.py` — any future regression is a hard CI fail.
+
+**Parity ratchet (drift = number of oracle keys outside per-tier tolerance):**
+
+| Step | Commit | Drift | Fix |
+|------|--------|-------|-----|
+| 12.1 | `552b106` | 212 → 210 | Bridge wiring fixes |
+| 12.2 | `869d344` | 210 → 117 | Engine pmem additive-channel + bridge totals |
+| 12.3a | `31e17f3` | 117 → 111 | AZ CAPEX Y0 + static baseline |
+| 12.3b | `ee4ed86` | 111 → 85 | SQ Depreciation rolling-avg over `depr_life` |
+| 12.3c | `eb5b1f2` | 85 → 55 | Retained IT admin + Win/SQL license multipliers (per-year integer arithmetic + 10-nines epsilon) |
+| 12.3d | `7c8a112` | 55 → 37 | pCore counts `int → float` (BA hand-types fractional values via `=12405/1.48`) |
+| 12.3e | `191fa00` | 37 → 21 | CF Rate sign + `Savings = max(0, …)` + `y10_savings_5y_cf` separate from Y10 |
+| 12.3f | `6f4e196` | 21 → 14 | Migration cost counts `num_vms` only (not topology residual `num_physical_servers_excl_hosts`) |
+| 12.3g | `4537b35` | 14 → 6 | `five_payback.*_npv` undiscounted Y1..Y5 sums (column H semantics); engine `compute_cf_roi_and_payback` switched from P&L → CF accessors (UI now shows BA-truth ROI -47.03% instead of buggy -55.58%) |
+| **12.3h** | **`c544441`** | **6 → 0** | **`num_physical_servers_excl_hosts: int → float`** preserves the fractional topology residual `D42 − num_vms / vm_to_server_ratio` (e.g. Customer A: `280 − 2831/12 = 44.0833`). Eliminates the last 1/12-host shortfall propagating to NW+Fitout depreciation Y5..Y10. |
+
+### Architecture: 3-way auditor
+
+`training/replicas/layer3_judge.py` compares **BA workbook** ↔ **replica oracle** ↔
+**engine bridge** with tiered absolute tolerance (`<$1: $0.005`, `<$100: $0.01`,
+`<$10K: $1`, `<$1M: 0.1%`, `≥$1M: 1%`). The replica stays at 395/395 CLEAN
+throughout; the engine ratchet only ever decreases.
+
+### Layer 3 invariants (NEVER REGRESS)
+
+- `fc.sq_total()` / `fc.az_total()` = **P&L** (depreciation + opex)
+- `fc.sq_total_cf()` / `fc.az_total_cf()` = **CASH FLOW** (capex + opex)
+- BA's "5Y CF with Payback" sheet is **CASH FLOW**. `compute_cf_roi_and_payback`
+  must use `_cf` accessors.
+- `five_payback.net_benefits_npv` = **DISCOUNTED** `npv_sq_5y − npv_az_5y`; the
+  other 6 `five_payback.*_npv` labels are **UNDISCOUNTED** raw Y1..Y5 sums (BA's
+  column H semantics).
+- BA hand-types fractional values via Excel formulas. Engine fields that mirror
+  BA cells (`pcores_*`, `num_physical_servers_excl_hosts`) **must be `float`**.
+
+### UI impact
+
+`summary.roi_cf` (rendered in `app/pages/agent_intake.py`, `app/pages/results.py`)
+now displays the BA-truth value `-47.03%` instead of the buggy `-55.58%`. This
+is a **correction**, not a regression — pre-existing tests already expected
+`-0.4703`.
+
+### Validation
+
+- **Replica**: 395/395 CLEAN (no regression across 12.1 → 12.3h)
+- **Engine drift**: 0 (was 212 at start of v1.5.0 cycle)
+- **Tests**: 90 pass / 10 pre-existing unrelated / 23 skip; 29 layer3 parity tests pass
+- **Methodology**: every fix gated by adversarial Explore review BEFORE apply,
+  independent 3-way audit AFTER apply, ratchet tightening at each commit.
+
+---
+
 ## v1.4.0 — Layer 1 BA Parity (training corpus + engine convergence)
 **Date:** 2026-04-27 | **Tests:** 14 new parity tests ✅ + existing suite unchanged
 
