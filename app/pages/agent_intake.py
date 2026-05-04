@@ -345,6 +345,49 @@ def _show_layer1() -> None:
             for w in inv.parse_warnings:
                 st.warning(w)
 
+    # ----------------------------------------------------------------
+    # Physical-memory derivation annotation (BA D49/D50/D52 reconciliation)
+    # ----------------------------------------------------------------
+    bm_local = st.session_state.get("benchmarks", BenchmarkConfig.from_yaml())
+    vmem     = float(inv.total_vmemory_gb or 0.0)
+    pmem_residual = float(getattr(inv, "total_host_memory_gb", 0.0) or 0.0)
+    derived  = vmem * bm_local.vmem_to_pmem_ratio
+    total_pm = derived + pmem_residual
+    with st.expander(
+        "ℹ️ Physical Memory Derivation — BA D49/D50/D52 reconciliation",
+        expanded=False,
+    ):
+        m1, m2, m3 = st.columns(3)
+        m1.metric(
+            "vMemory (provisioned)",
+            f"{vmem:,.0f} GiB",
+            help="BA D49 — sum of guest-OS provisioned RAM across in-scope VMs (vInfo).",
+        )
+        m2.metric(
+            f"Engine-derived pMemory (×{bm_local.vmem_to_pmem_ratio:.2f})",
+            f"{derived:,.0f} GiB",
+            help=(
+                "vMemory × vmem_to_pmem_ratio. Default ratio 1.0 assumes no "
+                "memory overcommit at the hypervisor (i.e. provisioned ≈ installed). "
+                "Adjust ratio in Step 3 · Benchmark Assumptions."
+            ),
+        )
+        m3.metric(
+            "Host residual (vHost)",
+            f"{pmem_residual:,.0f} GiB",
+            help=(
+                "BA D52 — sum of installed physical RAM on ESX hosts that "
+                "is NOT covered by the per-VM derivation. "
+                "From RVTools vHost Memory Size column."
+            ),
+        )
+        st.caption(
+            f"**Total pMemory used in cost model = {total_pm:,.0f} GiB** "
+            f"= derived ({derived:,.0f}) + host residual ({pmem_residual:,.0f}). "
+            "If the residual is large relative to derived, the BA workbook is leaning on hand-typed "
+            "host RAM rather than the per-VM rollup — consider double-checking vHost coverage in RVTools."
+        )
+
 def _render_l1_override() -> None:
     l1 = st.session_state["_l1_result"]
     with st.expander("⚙️ Override inventory parameters & re-run", expanded=False):
