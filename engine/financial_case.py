@@ -267,8 +267,21 @@ def _azure_consumption_by_year(
     return result
 
 
-def _migration_costs_by_year(inputs: BusinessCaseInputs) -> list[float]:
-    """Net migration costs (gross cost + Microsoft funding) by year.
+def _migration_costs_by_year(
+    inputs: BusinessCaseInputs,
+) -> tuple[list[float], list[float]]:
+    """Migration costs split into ``(net_list, funding_list)``.
+
+    BA workbook canonical (`Detailed Financial Case`):
+      * Row 71 "Azure Migration Costs" = ``Q46 = gross + Q47`` → **NET** migration
+        (gross VM migration cost + Microsoft funding).
+      * Row 72 "Microsoft Investments" = ``Q47`` = ACO + ECIF per year (funding alone).
+
+    Total Operating Cash Flow `Q73 = SUM(Q60:Q72)` adds BOTH rows, which means
+    funding is **double-counted** in the BA total — a template peculiarity that we
+    mirror by populating both `fc.az_migration_costs` (NET) and
+    `fc.az_microsoft_funding` (funding alone). For Customer A funding is 0 and
+    the values are identical to the prior single-list behavior.
 
     BA workbook semantics (1-Client Variables ``D41 = SUM(D39:D40)``):
     Migration cost is per-VM (D39) plus any explicitly-entered non-host
@@ -294,7 +307,8 @@ def _migration_costs_by_year(inputs: BusinessCaseInputs) -> list[float]:
             ramp_prev = ramp_this
         for yr in range(1, YEARS + 1):
             funding[yr] += cp.aco_by_year[yr - 1] + cp.ecif_by_year[yr - 1]
-    return [gross[i] + funding[i] for i in range(YEARS + 1)]
+    net = [gross[i] + funding[i] for i in range(YEARS + 1)]
+    return net, funding
 
 
 def compute(
@@ -308,7 +322,7 @@ def compute(
     fc = FinancialCase()
 
     az_consumption = _azure_consumption_by_year(inputs, benchmarks)
-    az_migration = _migration_costs_by_year(inputs)
+    az_migration_net, az_microsoft_funding = _migration_costs_by_year(inputs)
 
     # Existing Azure run rate
     existing_az = [0.0] * (YEARS + 1)
@@ -406,7 +420,8 @@ def compute(
 
         # --- Azure Case: Azure-only costs ---
         fc.az_azure_consumption[yr] = az_consumption[yr]
-        fc.az_migration_costs[yr] = az_migration[yr]
+        fc.az_migration_costs[yr] = az_migration_net[yr]
+        fc.az_microsoft_funding[yr] = az_microsoft_funding[yr]
         fc.az_existing_azure_run_rate[yr] = existing_az[yr]
 
     return fc

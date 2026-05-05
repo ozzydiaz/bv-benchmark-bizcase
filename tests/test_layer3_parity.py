@@ -39,6 +39,7 @@ from training.replicas.layer3_judge import (
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CUSTOMER_A_WORKBOOK = REPO_ROOT / "customer_a_BV_Benchmark_Business_Case_v6.xlsm"
+CUSTOMER_B_WORKBOOK = REPO_ROOT / "customer_b_BV_Benchmark_Business_Case_v6.xlsm"
 
 
 # ---------------------------------------------------------------------------
@@ -812,3 +813,203 @@ def test_engine_drift_does_not_exceed_baseline_customer_a(golden):
         "ratchet only if the increase is intentional."
     )
     pass
+
+
+# ---------------------------------------------------------------------------
+# Customer B parity (Step 15 — ECIF onboarding)
+# ---------------------------------------------------------------------------
+#
+# Customer B exercises the Microsoft funding (ECIF) feature that Customer A
+# left at zero. The BA workbook canonical structure for ECIF is:
+#
+#   * '2a-Consumption Plan Wk1'!E22:N22 — per-year ECIF (negative numbers).
+#     Customer B has -1,050,000 in Y1, Y2, Y3 (E22, F22, G22).
+#   * 'Detailed Financial Case'!Q46 = gross migration + Q47 (NET).
+#   * 'Detailed Financial Case'!Q47 = ACO + ECIF (funding alone).
+#   * 'Summary Financial Case' rows 24/25 sum these via SUMIF.
+#   * Row 73/75 SUM(Q60:Q72) — DOUBLE-COUNTS funding (BA template quirk).
+#
+# Step 15 fixes ensure ALL ECIF-related cells pass on both replica and engine
+# paths. The remaining residuals are bucket-(a) Customer-A pattern bias
+# (e.g. AZ OPEX.Y3 cascade) and bucket-(a) status_quo drift surfaced by
+# Customer B's different sizing — to be addressed in subsequent steps.
+
+# Replica drift ratchet for Customer B. Step 15 baseline = 10 (AZ OPEX.Y3
+# cascade — single root-cause bug masked by Customer A's ramp). Subsequent
+# steps must DECREASE this number.
+MAX_REPLICA_DRIFT_CUSTOMER_B = 10
+
+# Engine drift ratchet for Customer B. Step 15 baseline = 89 (75 status_quo
+# cells + 14 derivatives). Subsequent steps must DECREASE this number.
+MAX_ENGINE_DRIFT_CUSTOMER_B = 89
+
+# ECIF cells that MUST pass after Step 15 (zero tolerance — these are the
+# Step 15 contract).
+ECIF_REPLICA_REQUIRED_CELLS = (
+    "cash_flow.AZ MS Funding.Y1",
+    "cash_flow.AZ MS Funding.Y2",
+    "cash_flow.AZ MS Funding.Y3",
+    "cash_flow.AZ Migration.Y1",
+    "cash_flow.AZ Migration.Y2",
+    "cash_flow.AZ Migration.Y3",
+    "five_payback.migration_npv",
+    "five_payback.total_costs_npv",
+)
+
+
+@pytest.fixture(scope="module")
+def golden_customer_b():
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip(f"Customer B workbook not found at {CUSTOMER_B_WORKBOOK}")
+    return extract_layer3_golden(str(CUSTOMER_B_WORKBOOK))
+
+
+def test_customer_b_extractor_pulls_395_cells(golden_customer_b):
+    """The golden extractor must yield 395 cells from Customer B (same shape as A)."""
+    flat = flatten_golden(golden_customer_b)
+    # flat is a list of (key, ref, value) tuples
+    assert len(flat) == 395, f"Expected 395 cells, got {len(flat)}"
+
+
+def test_customer_b_ecif_replica_cells_pass(golden_customer_b):
+    """All ECIF-mandated replica cells (Step 15 contract) must pass with zero drift."""
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import (
+        compute_status_quo_cash_flow_dict,
+    )
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip("Customer B workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_B_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_B_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_B_WORKBOOK))
+
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+    replica.update(compute_project_npv_dict(client, bm, cons))
+
+    report = audit(golden_customer_b, replica_values=replica, engine_values=None)
+    failed = {a.label for a in report.audits if a.replica_passes is False}
+    missing = [c for c in ECIF_REPLICA_REQUIRED_CELLS if c in failed]
+    assert not missing, (
+        f"ECIF replica regression — these cells must pass per Step 15 contract: {missing}"
+    )
+
+
+def test_customer_b_ecif_engine_cells_pass(golden_customer_b):
+    """All ECIF-mandated engine cells (Step 15 contract) must pass with zero drift."""
+    from training.replicas.engine_bridge_l3 import compute_engine_layer3_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip("Customer B workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_B_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_B_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_B_WORKBOOK))
+
+    engine = compute_engine_layer3_dict(client, bm, cons)
+    report = audit(golden_customer_b, replica_values=None, engine_values=engine)
+    failed = {a.label for a in report.audits if a.engine_passes is False}
+    missing = [c for c in ECIF_REPLICA_REQUIRED_CELLS if c in failed]
+    assert not missing, (
+        f"ECIF engine regression — these cells must pass per Step 15 contract: {missing}"
+    )
+
+
+def test_customer_b_engine_bridge_covers_all_oracle_cells(golden_customer_b):
+    """The engine bridge must populate ALL 395 oracle keys for Customer B too."""
+    from training.replicas.engine_bridge_l3 import compute_engine_layer3_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip("Customer B workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_B_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_B_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_B_WORKBOOK))
+
+    engine = compute_engine_layer3_dict(client, bm, cons)
+    report = audit(golden_customer_b, replica_values=None, engine_values=engine)
+    assert report.engine_unknown_count == 0, (
+        f"Engine bridge missing {report.engine_unknown_count} keys for Customer B"
+    )
+    assert report.total_cells == 395
+
+
+def test_customer_b_replica_drift_under_ratchet(golden_customer_b):
+    """Replica drift ratchet for Customer B (one-way: only decreases)."""
+    from training.replicas.layer3_azure_case import compute_azure_case_dict
+    from training.replicas.layer3_cash_flow import (
+        compute_status_quo_cash_flow_dict,
+    )
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+    from training.replicas.layer3_project_npv import compute_project_npv_dict
+    from training.replicas.layer3_status_quo import compute_status_quo
+
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip("Customer B workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_B_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_B_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_B_WORKBOOK))
+
+    replica: dict = {}
+    replica.update(compute_status_quo(client, bm))
+    replica.update(compute_status_quo_cash_flow_dict(client, bm))
+    replica.update(compute_azure_case_dict(client, bm, cons))
+    replica.update(compute_project_npv_dict(client, bm, cons))
+
+    report = audit(golden_customer_b, replica_values=replica, engine_values=None)
+    assert report.replica_fail_count <= MAX_REPLICA_DRIFT_CUSTOMER_B, (
+        f"Customer B replica drift increased: {report.replica_fail_count} > "
+        f"MAX_REPLICA_DRIFT_CUSTOMER_B ({MAX_REPLICA_DRIFT_CUSTOMER_B}). "
+        "Fix the regression OR lower the ratchet (only allowed to decrease)."
+    )
+
+
+def test_customer_b_engine_drift_under_ratchet(golden_customer_b):
+    """Engine drift ratchet for Customer B (one-way: only decreases)."""
+    from training.replicas.engine_bridge_l3 import compute_engine_layer3_dict
+    from training.replicas.layer3_inputs import (
+        load_benchmark_inputs,
+        load_client_inputs,
+        load_consumption_inputs,
+    )
+
+    if not CUSTOMER_B_WORKBOOK.exists():
+        pytest.skip("Customer B workbook required")
+
+    client = load_client_inputs(str(CUSTOMER_B_WORKBOOK))
+    bm = load_benchmark_inputs(str(CUSTOMER_B_WORKBOOK))
+    cons = load_consumption_inputs(str(CUSTOMER_B_WORKBOOK))
+
+    engine = compute_engine_layer3_dict(client, bm, cons)
+    report = audit(golden_customer_b, replica_values=None, engine_values=engine)
+    assert report.engine_fail_count <= MAX_ENGINE_DRIFT_CUSTOMER_B, (
+        f"Customer B engine drift increased: {report.engine_fail_count} > "
+        f"MAX_ENGINE_DRIFT_CUSTOMER_B ({MAX_ENGINE_DRIFT_CUSTOMER_B}). "
+        "Fix the regression OR lower the ratchet (only allowed to decrease)."
+    )

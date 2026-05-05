@@ -266,26 +266,43 @@ def _az_migration_series(
     consumption: InputsConsumption,
     ramp: tuple[float, ...],
 ) -> tuple[float, ...]:
-    """Migration cost: per-year delta × total_VMs × cost_per_VM."""
+    """NET migration cost per year, matching BA `Detailed Financial Case!Q46`:
+
+        Q46 = SUM('2a'!E20, '2b'!E20, '2c'!E20) + Q47
+            = (gross migration: total_VMs * Δramp * cost_per_VM)
+            + (Microsoft funding: ACO + ECIF per year)
+
+    Customer A funding is zero across all years → Q46 = gross only (unchanged).
+    Customer B has ECIF -1.05M Y1–Y3 → Q46 = gross + ECIF (NET, smaller).
+    """
     total_vms = client.total_vms_and_servers_combined
     cost_per = consumption.migration_cost_per_vm
+    aco = consumption.aco_by_year
+    ecif = consumption.ecif_by_year
     out = [0.0]
     for t in range(1, N_YEARS):
         delta_ramp = ramp[t] - _prior(ramp, t)
-        out.append(total_vms * delta_ramp * cost_per)
+        gross = total_vms * delta_ramp * cost_per
+        funding = aco[t - 1] + ecif[t - 1]
+        out.append(gross + funding)
     return tuple(out)
 
 
 def _az_ms_funding_series(consumption: InputsConsumption) -> tuple[float, ...]:
-    """ACO + ECIF spread.
+    """Microsoft funding (ACO + ECIF) per year, matching BA `Detailed Financial
+    Case!Q47 = SUM('2a'!E23, '2b'!E23, '2c'!E23)` where '2a'!E23 = SUM(E21:E22)
+    is the per-year sum of ACO (row 21) and ECIF (row 22).
 
-    Customer A enters totals (D21 + D22) with no explicit per-year split, so the
-    BA workbook leaves all per-year cells blank ⇒ 0 across Y0..Y10. We mirror
-    that behaviour. (The cell-level row-23 SUM check on the Consumption Plan
-    sheet is intentionally left to the engine layer if a customer ever does
-    enter per-year amounts.)
+    Step 15: previously hard-coded zeros (Customer A pattern). Customer B
+    populates E22:N22 with per-year ECIF subsidies, which now flow through here.
+    For Customer A all per-year cells are blank → 0.0 across Y0..Y10 (unchanged).
     """
-    return tuple(0.0 for _ in range(N_YEARS))
+    aco = consumption.aco_by_year
+    ecif = consumption.ecif_by_year
+    out = [0.0]  # Y0
+    for t in range(1, N_YEARS):
+        out.append(aco[t - 1] + ecif[t - 1])
+    return tuple(out)
 
 
 # ---------------------------------------------------------------------------

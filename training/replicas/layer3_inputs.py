@@ -169,8 +169,15 @@ class InputsConsumption:
 
     # Discount + funding
     azure_consumption_discount: float  # ACD, 0..1
-    aco_total: float  # one-time
-    ecif_total: float
+    aco_total: float  # one-time, derived from per-year sums (informational)
+    ecif_total: float  # one-time, derived from per-year sums (informational)
+    # Per-year ACO/ECIF (Step 15 / Customer B): authoritative source for funding.
+    # BA workbook canonical: '2a-Consumption Plan Wk1'!E21:N21 (ACO) and E22:N22 (ECIF).
+    # D21 / D22 are SUM() formulas over these per-year cells. For Customer A all
+    # per-year cells are blank (treated as 0.0); for Customer B, Y1..Y3 carry the
+    # ECIF subsidy. Length is exactly 10 = Y1..Y10.
+    aco_by_year: tuple[float, ...]
+    ecif_by_year: tuple[float, ...]
 
     # Backup / DR
     backup_activated: bool
@@ -319,6 +326,11 @@ def load_consumption_inputs(workbook_path: str | Path) -> InputsConsumption:
     # Migration ramp Y1..Y10 — row 17, cols E..N (5..14)
     ramp = tuple(_f(cp.cell(row=17, column=c)) for c in range(5, 15))
 
+    # Per-year ACO (row 21) and ECIF (row 22), cols E..N (5..14). Blank → 0.0.
+    # BA D21 = SUM(E21:N21) and D22 = SUM(E22:N22) — per-year is canonical.
+    aco_by_year = tuple(_f(cp.cell(row=21, column=c)) for c in range(5, 15))
+    ecif_by_year = tuple(_f(cp.cell(row=22, column=c)) for c in range(5, 15))
+
     return InputsConsumption(
         migration_cost_per_vm=_f(cp["D14"], 1500.0),
         migration_ramp_eoy=ramp,
@@ -328,6 +340,8 @@ def load_consumption_inputs(workbook_path: str | Path) -> InputsConsumption:
         azure_consumption_discount=_f(cp["D8"]),  # if present
         aco_total=_f(cp["D21"]),
         ecif_total=_f(cp["D22"]),
+        aco_by_year=aco_by_year,
+        ecif_by_year=ecif_by_year,
         backup_activated=_b(cp["E35"]),
         backup_storage_in_azure_run_rate=_b(cp["E38"]),
         backup_software_in_azure_run_rate=_b(cp["E39"]),

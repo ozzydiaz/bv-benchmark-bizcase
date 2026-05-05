@@ -123,7 +123,7 @@ def compute_project_npv_dict(
     * ``five_payback.payback_years``
     """
     sq_capex, sq_opex, sq_total = compute_status_quo_cash_flow(client, bm)
-    az_capex, az_opex, az_consumption, az_migration, _, az_total = (
+    az_capex, az_opex, az_consumption, az_migration, az_ms_funding, az_total = (
         compute_azure_case_cash_flow(client, bm, consumption)
     )
 
@@ -172,7 +172,12 @@ def compute_project_npv_dict(
     ]
     admin_y1_y5 = [sq_admin[t] - az_admin[t] for t in range(1, 6)]
     azure_run_y1_y5 = [-az_consumption[t] for t in range(1, 6)]
-    migration_y1_y5 = [-az_migration[t] for t in range(1, 6)]
+    # BA `five_payback.migration_npv` = -SUM(Q71 + Q72) where Q71 = NET migration
+    # (gross+funding) and Q72 = funding alone — i.e. the BA double-counts funding
+    # in the migration cost. Mirror that: total migration cost flowing into the
+    # 5Y CF Payback is NET migration + funding (== gross + 2×funding for Customer B).
+    # For Customer A funding=0 → unchanged.
+    migration_y1_y5 = [-(az_migration[t] + az_ms_funding[t]) for t in range(1, 6)]
     benefits_y1_y5 = [
         infra_y1_y5[i] + admin_y1_y5[i] for i in range(5)
     ]

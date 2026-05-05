@@ -184,9 +184,11 @@ def replica_inputs_to_engine_inputs(
         annual_storage_consumption_lc_y10=cons.storage_consumption_y10,
         annual_other_consumption_lc_y10=cons.other_consumption_y10,
         azure_consumption_discount=cons.azure_consumption_discount,
-        # ACO/ECIF: replica only stores totals — feed Y1 as a single-shot, rest zero
-        aco_by_year=[cons.aco_total] + [0.0] * 9,
-        ecif_by_year=[cons.ecif_total] + [0.0] * 9,
+        # ACO/ECIF: per-year arrays from BA workbook E21:N21 / E22:N22 (Step 15).
+        # Customer A has all zeros (per-year cells blank); Customer B carries ECIF
+        # -1.05M in Y1..Y3. The BA's D21 / D22 totals are SUM() formulas of these.
+        aco_by_year=list(cons.aco_by_year),
+        ecif_by_year=list(cons.ecif_by_year),
         backup_activated=_yesno(cons.backup_activated),
         backup_storage_in_consumption=_yesno(cons.backup_storage_in_azure_run_rate),
         backup_software_in_consumption=_yesno(cons.backup_software_in_azure_run_rate),
@@ -437,7 +439,10 @@ def compute_engine_layer3_dict(
     total_benefits = [infra_savings[yr] + infra_admin_savings[yr] for yr in range(n)]
 
     incremental_azure = [-az_consumption_total[yr] for yr in range(n)]
-    migration = [-az_migration[yr] for yr in range(n)]
+    # BA `five_payback.migration_npv` = -SUM(Q71 + Q72) = -SUM(NET migration + funding)
+    # = -SUM(gross + 2×funding). Mirror the BA double-count so Customer B parity
+    # matches; for Customer A funding=0, this is a no-op.
+    migration = [-(az_migration[yr] + az_funding[yr]) for yr in range(n)]
     total_costs = [incremental_azure[yr] + migration[yr] for yr in range(n)]
     net_benefits = [total_benefits[yr] + total_costs[yr] for yr in range(n)]
 
