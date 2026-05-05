@@ -1,27 +1,35 @@
 """
-Per-VM Azure pricing-offer breakdown (v1.7).
+FYI-only flat-% pricing-offer sensitivity (v1.7 — INTERIM).
 
-For each consumption plan in ``BusinessCaseInputs``, compute what the *Y10
-steady-state* compute spend would be under each individual Azure pricing
-offer (PAYG, RI 1-Year, RI 3-Year, SP 1-Year, SP 3-Year) and sum the per-VM
-contributions into per-offer totals.
+**Honest scope.** This module is a *fleet-aggregate × static-benchmark-discount*
+sensitivity panel. It multiplies the per-plan PAYG aggregate
+(``ConsumptionPlan.annual_compute_consumption_lc_y10``) by static fractions
+on ``BenchmarkConfig`` (RI-1Y 20%, RI-3Y 36%, SP-1Y 18%, SP-3Y 30%) to show
+"what if all VMs in this plan were on offer X at the benchmark rate?".
 
-Why not "blended"
------------------
-A given VM is placed on **one** Azure pricing offer at a time — PAYG, an RI,
-or a Savings Plan. Blending these offers as a weighted-average ACD gives a
-single number that hides the actual per-offer cost structure. This module
-instead exposes the 5 alternatives side-by-side so the BA can see exactly
-which offer drives the largest savings for the customer's fleet.
+It is **NOT** per-VM-from-API pricing. The Azure Retail Price API path in
+``engine/consumption_builder.py`` only fetches PAYG rates today; per-VM
+RI / SP rates are not retrieved or persisted anywhere. True per-VM offer
+pricing is planned for v1.8 — see ``docs/RFC-v1.8-per-vm-pricing.md``.
+
+The user's authoritative principle (2026-05-05) is:
+
+  "NO FLEETWIDE is used for the financials nor ACR. Fleetwide averages are
+  only for FYI to the user/BA. ALL calculations for ACR and the pricing
+  offers are per-VM, then aggregated to the various sums to be shown AFTER
+  the azure retail price API provides the PAYG, RI1, RI3, SP1, SP3 pricing
+  offers per-VM."
+
+This v1.7 module satisfies the *FYI* clause only. v1.8 will replace the
+flat-% formula with per-VM API rates summed up.
 
 Engine-math invariant
 ---------------------
-This module is **display-only**. It reads the PAYG list price the
-consumption builder already produces (``ConsumptionPlan.annual_compute_consumption_lc_y10``)
-and applies discount fractions from ``BenchmarkConfig``. It does **not**
-mutate the financial case, retained-cost, or NPV pipeline, so Layer 3
-parity (Customer A 395/395 + Customer B 395/395 zero drift) is preserved
-by construction.
+This module is **strictly display-only**. It does not mutate the financial
+case, retained-cost, or NPV pipeline, so Layer 3 parity (Customer A 395/395
++ Customer B 395/395 zero drift) is preserved by construction. Any change
+that flows its output back into ``financial_case`` or ``outputs`` re-opens
+layer 3 parity on **both** customers and is forbidden until v1.8 lands.
 """
 
 from __future__ import annotations

@@ -7,18 +7,77 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ## Roadmap (forward backlog — not yet released)
 
-### v2.0 — Per-VM RI/SP allocation (deferred)
-Per-VM RI/SP allocation with Y1 upfront bifurcation. Requires:
+### v1.8 — Per-VM Azure Retail Price API offers (RFC drafted, awaiting user approval)
+**RFC:** [docs/RFC-v1.8-per-vm-pricing.md](docs/RFC-v1.8-per-vm-pricing.md)
+- Fetch per-VM PAYG / RI-1Y / RI-3Y / SP-1Y / SP-3Y rates from the Azure Retail Price API in lockstep.
+- Persist `PerVmOfferCost` 5-tuples on every `ConsumptionPlan`.
+- Replace v1.7's flat-% formula in `engine/pricing_offers.py` with per-VM sums.
+- Two phasing options in RFC: **Option A** (display only, NPV unchanged, layer 3 zero drift preserved); **Option B** (per-VM ACR drives NPV — high risk, breaks layer 3 zero drift against current BA workbook). Recommendation: Option A for v1.8 + roll the NPV piece into v2.0.
+
+### v2.0 — Per-VM RI/SP allocation drives NPV (deferred)
+Per-VM RI/SP offer selection drives ACR / NPV (not just display). Requires:
   - Replica upgrade in lock-step with engine
   - New summary fields: `azure_ri_upfront_y1`, `azure_ri_amortization_by_year`
   - CF/P&L split in `financial_case.py`
   - Layer 3 parity re-baseline against **two** customers
-- **Risk:** breaks the "Azure consumption is pure OPEX" invariant the engine currently relies on for `az_total_cf()` vs `az_total()` (P&L). Drift could spike to 200+ cells. Earliest planning after v1.7 ships and is validated.
+  - BA workbook restructure (workbook itself uses fleet ACD today)
+- **Risk:** breaks the "Azure consumption is pure OPEX" invariant the engine currently relies on for `az_total_cf()` vs `az_total()` (P&L). Drift could spike to 200+ cells.
+
+---
+
+## v1.7.1 — FYI-only relabel (honesty patch)
+**Date:** 2026-05-05 | **Tag:** `v1.7.1-fyi-relabel` | **Tests:** 79 passed, 23 skipped (zero regression)
+
+### Why this patch exists
+
+User clarification on 2026-05-05 (verbatim, authoritative for next phase):
+
+> "NO FLEETWIDE is used for the financials nor ACR. Fleetwide averages are
+> only for FYI to the user/BA. ALL calculations for ACR and the pricing
+> offers are per-VM, then aggregated to the various sums to be shown AFTER
+> the azure retail price API provides the PAYG, RI1, RI3, SP1, SP3 pricing
+> offers per-VM."
+
+An adversarial-judge audit on the v1.7 codebase returned **NON-COMPLIANT,
+HIGH confidence, 5 blocking gaps**. The v1.7 panel uses `aggregate × static
+benchmark %` (a fleetwide flat-% formula), which is exactly the pattern the
+user just ruled out for canonical pricing.
+
+The v1.7 module / panel is **not removed** — it is honest as a fleetwide
+*FYI sensitivity* (which the user's principle explicitly allows) — but it
+must be clearly labeled as such so no BA mistakes it for per-VM API pricing.
+
+### What changed (UI + docstrings only; zero engine math change)
+
+- [app/pages/consumption.py](app/pages/consumption.py) — pricing-offer
+  expander title prefixed with "(FYI-only flat-% — NOT per-VM API pricing)";
+  prominent `st.warning` banner on open: "FYI-ONLY · interim flat-%
+  sensitivity. Does NOT feed NPV/ROI/ACR. True per-VM RI/SP from Azure
+  Retail Price API planned for v1.8."
+- [engine/pricing_offers.py](engine/pricing_offers.py) — module docstring
+  rewritten to state "FYI-only flat-% sensitivity (v1.7 — INTERIM)"; quotes
+  the user's authoritative principle in full; cross-references the v1.8 RFC.
+- [docs/RFC-v1.8-per-vm-pricing.md](docs/RFC-v1.8-per-vm-pricing.md) — new
+  RFC scoping the per-VM-from-API phase, including 5 open questions that
+  require user adjudication before any v1.8 build begins.
+
+### NEVER REGRESS (carried forward)
+
+- `engine/pricing_offers.py` remains strictly display-only.
+- Layer 3 parity: Customer A 395/395 + Customer B 395/395 zero drift intact.
+- `MAX_ENGINE_DRIFT == 0` AND `MAX_ENGINE_DRIFT_CUSTOMER_B == 0`.
+- v1.7 flat-% formula stays in place behind the FYI banner until v1.8
+  replaces the underlying math with per-VM API sums.
 
 ---
 
 ## v1.7 — Per-VM Pricing Offer Sensitivity (UI-only, zero engine math change)
 **Date:** 2026-05-05 | **Tag:** `v1.7.0-pricing-offer-breakdown` | **Tests:** 7 v1.7 acceptance ✅ + 7 v1.6 acceptance ✅ + 35 layer3 parity ✅ (Customer A 395/395 + Customer B 395/395 zero drift preserved)
+
+> **Note (v1.7.1 honesty patch, 2026-05-05):** the panel below uses fleetwide
+> flat-% benchmarks, NOT per-VM Azure Retail Price API rates. v1.7.1 relabels
+> the UI as "FYI-only / interim". v1.8 (RFC drafted) replaces the math with
+> per-VM API sums. See [docs/RFC-v1.8-per-vm-pricing.md](docs/RFC-v1.8-per-vm-pricing.md).
 
 ### Reframed scope
 

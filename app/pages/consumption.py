@@ -188,9 +188,12 @@ def render():
         ))
         st.divider()
 
-    # ── Pricing-offer sensitivity (v1.7) ─────────────────────────────────
-    # Display-only "what if all VMs were on offer X" breakdown. Does NOT
-    # change NPV / ROI — those continue to use the BA-truth ACD above.
+    # ── Pricing-offer sensitivity (v1.7, FYI-only) ─────────────────────
+    # FYI-ONLY interim flat-% sensitivity. Applies static benchmark
+    # discount fractions (RI-1Y 20%, RI-3Y 36%, SP-1Y 18%, SP-3Y 30%) to
+    # the per-plan PAYG aggregate. NOT per-VM API pricing. NOT a financial
+    # input. NPV / ROI continue to use the BA-truth ACD above.
+    # See docs/RFC-v1.8-per-vm-pricing.md for the per-VM-from-API plan.
     _render_pricing_offer_breakdown(updated_plans)
 
     if st.button("💾 Save & Continue →", type="primary"):
@@ -200,14 +203,18 @@ def render():
 
 
 def _render_pricing_offer_breakdown(plans: list[ConsumptionPlan]) -> None:
-    """Render the per-VM pricing-offer sensitivity table.
+    """Render the FYI-only flat-%% pricing-offer sensitivity table.
 
-    Sums the per-VM contributions to PAYG list price (already aggregated in
-    ``ConsumptionPlan.annual_compute_consumption_lc_y10``) under each Azure
-    pricing offer. The 5 offer rows answer: "if every VM in this plan were
-    placed on PAYG / RI-1Y / RI-3Y / SP-1Y / SP-3Y, what would Y10 compute
-    cost?". A final 'BA-truth' row anchors the comparison to the discount
-    actually fed into NPV.
+    **Honest scope (v1.7):** This is a *fleet-aggregate × static-benchmark-%*
+    sensitivity, NOT per-VM-from-API offer pricing. It multiplies the
+    per-plan PAYG aggregate (``ConsumptionPlan.annual_compute_consumption_lc_y10``)
+    by the static discount fractions on ``BenchmarkConfig`` (RI-1Y 20%,
+    RI-3Y 36%, SP-1Y 18%, SP-3Y 30%). It does NOT consult the Azure Retail
+    Price API for per-VM RI/SP rates and does NOT feed any financial output.
+    See ``docs/RFC-v1.8-per-vm-pricing.md`` for the per-VM contract.
+
+    A final 'BA-truth' row anchors the comparison to the discount actually
+    fed into NPV (``ConsumptionPlan.azure_consumption_discount``).
     """
     if not plans:
         return
@@ -219,16 +226,23 @@ def _render_pricing_offer_breakdown(plans: list[ConsumptionPlan]) -> None:
         or BenchmarkConfig.from_yaml()
 
     with st.expander(
-        "💰 Pricing-offer sensitivity — Y10 compute under each Azure offer",
+        "💰 Pricing-offer sensitivity (FYI-only flat-% — NOT per-VM API pricing)",
         expanded=False,
     ):
+        st.warning(
+            "⚠️ **FYI-ONLY · interim flat-% sensitivity.** This panel applies "
+            "static benchmark discounts (RI-1Y 20%, RI-3Y 36%, SP-1Y 18%, SP-3Y 30%) "
+            "to the **per-plan PAYG aggregate**. It is **NOT** per-VM API-sourced "
+            "pricing and **does NOT** feed NPV / ROI / ACR. True per-VM RI/SP "
+            "pricing from the Azure Retail Price API is planned for v1.8 "
+            "(see `docs/RFC-v1.8-per-vm-pricing.md`)."
+        )
         st.caption(
-            "Each VM in your plan can be placed on **one** Azure pricing offer "
-            "at a time (PAYG, RI 1Y, RI 3Y, SP 1Y, or SP 3Y). The table below "
-            "shows what Y10 compute spend would be if **all VMs** in this plan "
-            "were on that offer. Rates are applied to the PAYG list-price total "
-            "the engine already produced. Storage and 'other' Azure services are "
-            "not RI/SP-eligible at this granularity and are shown as PAYG."
+            "Reading the table: each row answers _'if **all VMs** in this plan "
+            "were on offer X at the benchmark discount, what would Y10 compute "
+            "cost?'_. The actual answer requires per-VM API rates (v1.8). "
+            "Storage and 'other' Azure services are not RI/SP-eligible and "
+            "are priced at PAYG across all offers."
         )
 
         # Per-plan tables (one workload at a time).
