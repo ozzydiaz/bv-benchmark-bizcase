@@ -439,6 +439,27 @@ class BenchmarkConfig(BaseModel):
     # ``"exit_multiple"`` should override based on industry comparables.
     tv_exit_multiple: float = 8.0
 
+    # ----------------------------------------------------------------------
+    # Azure pricing-offer discounts (v1.7 — UI-only sensitivity panel).
+    #
+    # Per-VM "what-if all VMs went on offer X" totals are derived by applying
+    # these discount fractions to the PAYG list price the consumption builder
+    # already produces. These knobs are NEVER fed into ``financial_case`` — the
+    # NPV/ROI numbers continue to use the BA-truth ``ConsumptionPlan.azure_consumption_discount``
+    # so Layer 3 zero-drift parity is preserved on both customers.
+    #
+    # Defaults align with the BA workbook D156/D157/D163-D166 model
+    # (paygo×0 + ri_1y×0.20 + ri_3y×0.36 + sp_1y×0.18 + sp_3y×0.30).
+    # ----------------------------------------------------------------------
+    ri_1y_discount: float = Field(0.20, ge=0.0, le=1.0,
+        description="Reserved Instance 1-Year discount off PAYG (fractional).")
+    ri_3y_discount: float = Field(0.36, ge=0.0, le=1.0,
+        description="Reserved Instance 3-Year discount off PAYG (fractional).")
+    sp_1y_discount: float = Field(0.18, ge=0.0, le=1.0,
+        description="Savings Plan 1-Year discount off PAYG (fractional).")
+    sp_3y_discount: float = Field(0.30, ge=0.0, le=1.0,
+        description="Savings Plan 3-Year discount off PAYG (fractional).")
+
     # Right-sizing parameters
     # Per-VM rightsizing.  When a VM has utilisation telemetry (vCPU.Overall/Max
     # or vMemory.Consumed/Size) the actual utilisation fraction is used; headroom

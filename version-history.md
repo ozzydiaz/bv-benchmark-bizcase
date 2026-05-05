@@ -7,24 +7,84 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ## Roadmap (forward backlog — not yet released)
 
-### v1.7 — RI/SP-blended Azure pricing (engine refactor, medium-risk)
-- Phase 2 from the May 2026 risk analysis: derive `effective_acd` as a family-blended weighted average from the BA workbook's D156/D157/D163-D166 cells:
-  ```
-  effective_acd = paygo×0
-                + ri_1y×0.20 + ri_3y×0.36
-                + sp_1y×0.18 + sp_3y×0.30
-  ```
-  Algebra unchanged; only the *value* fed to `financial_case.py:260` shifts. Layer 3 parity should hold because the BA workbook already does this rollup in `new_acd`.
-- Opt-in flag `BenchmarkConfig.use_ri_sp_blending: bool = False` until two-customer baseline confirms.
-- **Out of scope (deferred to v2.0):** per-VM RI/SP allocation with Y1 upfront bifurcation. That requires:
+### v2.0 — Per-VM RI/SP allocation (deferred)
+Per-VM RI/SP allocation with Y1 upfront bifurcation. Requires:
   - Replica upgrade in lock-step with engine
   - New summary fields: `azure_ri_upfront_y1`, `azure_ri_amortization_by_year`
   - CF/P&L split in `financial_case.py`
   - Layer 3 parity re-baseline against **two** customers
-- **Risk:** breaks the "Azure consumption is pure OPEX" invariant the engine currently relies on for `az_total_cf()` vs `az_total()` (P&L). Drift could spike to 200+ cells.
+- **Risk:** breaks the "Azure consumption is pure OPEX" invariant the engine currently relies on for `az_total_cf()` vs `az_total()` (P&L). Drift could spike to 200+ cells. Earliest planning after v1.7 ships and is validated.
 
-### v2.0 — Per-VM RI/SP allocation (deferred)
-See v1.7 deferred section. Earliest planning after v1.7 ships and is validated.
+---
+
+## v1.7 — Per-VM Pricing Offer Sensitivity (UI-only, zero engine math change)
+**Date:** 2026-05-05 | **Tag:** `v1.7.0-pricing-offer-breakdown` | **Tests:** 7 v1.7 acceptance ✅ + 7 v1.6 acceptance ✅ + 35 layer3 parity ✅ (Customer A 395/395 + Customer B 395/395 zero drift preserved)
+
+### Reframed scope
+
+The original v1.7 plan was "RI/SP-blended ACD" — a single weighted-average
+discount derived from per-family mix percentages. That framing was rejected
+during design review because **a given VM is placed on exactly one Azure
+pricing offer at a time** (PAYG, RI 1Y, RI 3Y, SP 1Y, or SP 3Y); blending
+those offers into one number hides the actual decision space.
+
+v1.7 replaces blending with a **per-VM pricing-offer breakdown**: compute
+each VM's Y10 compute spend under every offer, sum across VMs, and surface
+the 5 alternatives side-by-side so the BA can see exactly which offer
+drives the largest savings.
+
+### What changed
+
+* `engine/models.py:BenchmarkConfig` — four new discount-rate fields:
+  - `ri_1y_discount: float = 0.20`
+  - `ri_3y_discount: float = 0.36`
+  - `sp_1y_discount: float = 0.18`
+  - `sp_3y_discount: float = 0.30`
+
+  Defaults match the BA workbook D156/D157/D163-D166 anchors. These fields
+  are **display-only**; nothing in `engine/financial_case.py`,
+  `engine/outputs.py`, or any L3 code path reads them.
+
+* `engine/pricing_offers.py` (new) — pure helper module:
+  - `compute_for_plan(plan, bm) -> PerPlanBreakdown` returns 5 standard
+    offer rows (PAYG, RI 1Y, RI 3Y, SP 1Y, SP 3Y) plus a `BA-truth (current ACD)`
+    anchor row that mirrors the discount currently fed into NPV.
+  - `compute(inputs, bm) -> PricingOfferBreakdown` builds the same per-plan
+    breakdown for every consumption plan in a `BusinessCaseInputs`.
+  - Each offer total = `payg_compute_y10 × (1 − offer_discount)`.
+
+* `app/pages/consumption.py` — new collapsible section "💰 Pricing-offer
+  sensitivity — Y10 compute under each Azure offer". Renders one table per
+  workload showing PAYG / RI 1Y / RI 3Y / SP 1Y / SP 3Y alongside the user's
+  BA-truth ACD, plus a callout flagging which standard offer would beat
+  (or fall short of) the negotiated discount. Storage and 'other' Azure
+  consumption are footnoted as not RI/SP-eligible at this granularity.
+
+* `tests/test_v17_pricing_offer_breakdown.py` (replaces
+  `test_v17_ri_sp_blending_scaffold.py`) — 7 acceptance tests:
+  - **AC-1** Discount fields present with documented defaults.
+  - **AC-2** `compute_for_plan` returns the 5 standard offers plus BA-truth.
+  - **AC-3** Offer totals = `payg × (1 − discount)` to the cent.
+  - **AC-3b** Zero-PAYG plan short-circuits without dividing by zero.
+  - **AC-4** Layer 3 drift constants (`MAX_ENGINE_DRIFT == 0` AND
+    `MAX_ENGINE_DRIFT_CUSTOMER_B == 0`) are preserved.
+  - **AC-4b** `compute_for_plan` is pure — no input mutation.
+  - **AC-5** No CF/P&L bifurcation fields leak onto `BusinessCaseSummary`
+    (per-VM RI/SP allocation remains deferred to v2.0).
+
+### Layer 3 invariants (NEVER REGRESS)
+
+All v1.5.0 + v1.5.1 + v1.6 invariants carry forward, plus:
+
+- `engine/pricing_offers.py` MUST remain pure and display-only. Any change
+  that flows its output back into `financial_case` (via NPV, ROI, savings,
+  or any P&L row) re-opens layer 3 parity on **both** customers.
+- The 7 acceptance tests in `tests/test_v17_pricing_offer_breakdown.py` are
+  the v1.7 contract; AC-4 re-imports both `MAX_ENGINE_DRIFT` and
+  `MAX_ENGINE_DRIFT_CUSTOMER_B` so any PR that bumps either ratchet is
+  caught at code review.
+- v2.0 (per-VM RI/SP allocation with Y1 upfront amortization) remains
+  deferred; AC-5 guards against accidentally landing the v2.0 fields early.
 
 ---
 

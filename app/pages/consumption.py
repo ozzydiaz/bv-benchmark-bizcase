@@ -7,7 +7,8 @@ shown as defaults and can be overridden.
 """
 
 import streamlit as st
-from engine.models import ConsumptionPlan, YesNo, MIGRATION_RAMP_PRESETS
+from engine.models import BenchmarkConfig, ConsumptionPlan, YesNo, MIGRATION_RAMP_PRESETS
+from engine import pricing_offers
 
 
 def render():
@@ -187,7 +188,121 @@ def render():
         ))
         st.divider()
 
+    # ── Pricing-offer sensitivity (v1.7) ─────────────────────────────────
+    # Display-only "what if all VMs were on offer X" breakdown. Does NOT
+    # change NPV / ROI — those continue to use the BA-truth ACD above.
+    _render_pricing_offer_breakdown(updated_plans)
+
     if st.button("💾 Save & Continue →", type="primary"):
         inputs.consumption_plans = updated_plans
         st.session_state["inputs"] = inputs
         st.success("Consumption plan saved.")
+
+
+def _render_pricing_offer_breakdown(plans: list[ConsumptionPlan]) -> None:
+    """Render the per-VM pricing-offer sensitivity table.
+
+    Sums the per-VM contributions to PAYG list price (already aggregated in
+    ``ConsumptionPlan.annual_compute_consumption_lc_y10``) under each Azure
+    pricing offer. The 5 offer rows answer: "if every VM in this plan were
+    placed on PAYG / RI-1Y / RI-3Y / SP-1Y / SP-3Y, what would Y10 compute
+    cost?". A final 'BA-truth' row anchors the comparison to the discount
+    actually fed into NPV.
+    """
+    if not plans:
+        return
+
+    # Use the active session benchmarks (set during L3 run) so any user
+    # edits to discount rates flow through; fall back to defaults otherwise.
+    bm: BenchmarkConfig = st.session_state.get("_l3_result", {}).get("bm") \
+        or st.session_state.get("benchmarks") \
+        or BenchmarkConfig.from_yaml()
+
+    with st.expander(
+        "💰 Pricing-offer sensitivity — Y10 compute under each Azure offer",
+        expanded=False,
+    ):
+        st.caption(
+            "Each VM in your plan can be placed on **one** Azure pricing offer "
+            "at a time (PAYG, RI 1Y, RI 3Y, SP 1Y, or SP 3Y). The table below "
+            "shows what Y10 compute spend would be if **all VMs** in this plan "
+            "were on that offer. Rates are applied to the PAYG list-price total "
+            "the engine already produced. Storage and 'other' Azure services are "
+            "not RI/SP-eligible at this granularity and are shown as PAYG."
+        )
+
+        # Per-plan tables (one workload at a time).
+        for plan in plans:
+            per = pricing_offers.compute_for_plan(plan, bm)
+            label = plan.workload_name or "Unnamed workload"
+            st.markdown(f"**Workload: {label}**")
+
+            if per.payg_compute_y10 <= 0:
+                st.info(
+                    "PAYG list-price compute is $0 for this plan — "
+                    "enter an annual compute estimate above to see offers."
+                )
+                continue
+
+            # Build the rows table.
+            rows_for_table = []
+            for r in per.rows:
+                rows_for_table.append({
+                    "Offer": r.offer,
+                    "Discount off PAYG": f"{r.discount_pct:.1%}",
+                    "Y10 compute total": f"${r.annual_total:,.0f}",
+                    "Annual savings vs PAYG": f"${r.savings_vs_payg:,.0f}",
+                    "% saved vs PAYG": f"{r.savings_pct_vs_payg:.1%}",
+                })
+            st.dataframe(rows_for_table, hide_index=True, use_container_width=True)
+
+            # Quick summary line — what's the gap between BA-truth and the
+            # cheapest standard offer?
+            standard = [r for r in per.rows if r.offer != "BA-truth (current ACD)"]
+            best = max(standard, key=lambda r: r.savings_vs_payg)
+            ba = next(r for r in per.rows if r.offer == "BA-truth (current ACD)")
+            delta = ba.annual_total - best.annual_total
+            if abs(delta) > 1.0:
+                if delta > 0:
+                    st.info(
+                        f"💡 **{best.offer}** would save an extra "
+                        f"**${delta:,.0f}/yr** vs your current ACD "
+                        f"({ba.discount_pct:.1%})."
+                    )
+                else:
+                    st.success(
+                        f"✅ Your current ACD ({ba.discount_pct:.1%}) is "
+                        f"**${-delta:,.0f}/yr** better than the best standard "
+                        f"offer ({best.offer} at {best.discount_pct:.1%})."
+                    )
+
+            # Storage / other footnote.
+            if per.storage_y10 > 0 or per.other_y10 > 0:
+                st.caption(
+                    f"Storage Y10 ${per.storage_y10:,.0f} and Other Y10 "
+                    f"${per.other_y10:,.0f} are not eligible for RI/SP and are "
+                    f"priced at PAYG list across all offers."
+                )
+
+        # Optional: cross-plan fleet roll-up if multiple plans.
+        if len(plans) > 1:
+            st.markdown("**Fleet roll-up (all workloads combined)**")
+            per_plan = [pricing_offers.compute_for_plan(p, bm) for p in plans]
+            payg_total = sum(p.payg_compute_y10 for p in per_plan)
+            fleet_rows = []
+            for offer in ("PAYG", "RI 1Y", "RI 3Y", "SP 1Y", "SP 3Y", "BA-truth (current ACD)"):
+                tot = 0.0
+                for pp in per_plan:
+                    for r in pp.rows:
+                        if r.offer == offer:
+                            tot += r.annual_total
+                            break
+                save = payg_total - tot
+                pct = (save / payg_total) if payg_total > 0 else 0.0
+                fleet_rows.append({
+                    "Offer": offer,
+                    "Fleet Y10 compute total": f"${tot:,.0f}",
+                    "Fleet savings vs PAYG": f"${save:,.0f}",
+                    "% saved vs PAYG": f"{pct:.1%}",
+                })
+            st.dataframe(fleet_rows, hide_index=True, use_container_width=True)
