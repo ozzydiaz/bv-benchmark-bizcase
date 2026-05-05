@@ -148,12 +148,19 @@ def compute_cf_roi_and_payback(
     g46 = cumulative[4] if len(cumulative) >= 5 else (cumulative[-1] if cumulative else 0.0)
     roi = (g46 - investment_npv) / investment_npv
 
-    # I32: fractional payback year
+    # I32: fractional payback year — match BA's `5Y CF with Payback` C47..G47
+    # logic which only fills a payback value when cumulative *crosses* the
+    # investment threshold between two consecutive observed years (C46→D46,
+    # D46→E46, etc.). If Y1's cumulative already covers the investment (i.e.
+    # payback < 1 year), every row's AND condition is False and BA returns 0
+    # as a "less than 1 year" sentinel. Mirror that by requiring the previous
+    # year to be strictly below threshold AND the current year ≥ threshold,
+    # AND requiring at least one observed prior year (yr ≥ 2).
     payback = 0.0
     prev_cum = 0.0
     for yr_idx, cum_yr in enumerate(cumulative):
         yr = yr_idx + 1
-        if cum_yr >= investment_npv:
+        if yr >= 2 and prev_cum < investment_npv and cum_yr >= investment_npv:
             delta = cum_yr - prev_cum
             frac  = (investment_npv - prev_cum) / delta if delta > 0 else 0.0
             payback = (yr - 1) + frac

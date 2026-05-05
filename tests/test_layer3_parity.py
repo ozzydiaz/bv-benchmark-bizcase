@@ -826,22 +826,38 @@ def test_engine_drift_does_not_exceed_baseline_customer_a(golden):
 #     Customer B has -1,050,000 in Y1, Y2, Y3 (E22, F22, G22).
 #   * 'Detailed Financial Case'!Q46 = gross migration + Q47 (NET).
 #   * 'Detailed Financial Case'!Q47 = ACO + ECIF (funding alone).
-#   * 'Summary Financial Case' rows 24/25 sum these via SUMIF.
-#   * Row 73/75 SUM(Q60:Q72) — DOUBLE-COUNTS funding (BA template quirk).
+#   * 'Summary Financial Case' rows 21..26 use SUMIF on the AH tag column of
+#     'Detailed Financial Case' rows 54..75. The tags ("CAPEX", "OPEX",
+#     "Azure Costs", "Migration Costs", "Microsoft Investments") are
+#     mutually exclusive — each tag matches a unique row, so row 26 sums
+#     these as independent buckets with no double-counting.
 #
-# Step 15 fixes ensure ALL ECIF-related cells pass on both replica and engine
-# paths. The remaining residuals are bucket-(a) Customer-A pattern bias
-# (e.g. AZ OPEX.Y3 cascade) and bucket-(a) status_quo drift surfaced by
-# Customer B's different sizing — to be addressed in subsequent steps.
+# Step 15.1 hardens the contract: BOTH replica and engine paths must reach
+# 395/395 on Customer B. The drifts present in Step 15 traced to two
+# distinct bugs that Customer A's coarse ramp pattern accidentally hid:
+#   1. `_az_dc_or_bandwidth` (replica) and `engine/retained_costs.py`
+#      (engine) used a single-factor `(1 - eoy_ramp[t-1])` decay where the
+#      BA workbook actually uses a chained product
+#      `Π_{k=1..t-1} (1 - eoy_ramp[k])`. For ramps that jump straight to
+#      1.0 (Customer A: [0.5, 1.0, ...]) the chain collapses to one factor,
+#      hiding the bug. Customer B's [0.33, 0.66, 1.0, ...] exposes it.
+#   2. The engine bridge clamped `num_physical_servers_excl_hosts` and
+#      `allocated_pcores_excl_hosts` residuals to ≥0, losing the BA's
+#      hand-typed D42/D47 totals when those values were SMALLER than what
+#      the engine derived from VM count / vCPU divided by ratios. New
+#      override fields in `WorkloadInventory` carry D42/D47 verbatim into
+#      `est_physical_servers_incl_hosts` / `est_allocated_pcores_incl_hosts`.
+#   3. The 5Y CF payback computation diverged from BA's
+#      `5Y CF with Payback!I32 = SUM(C47:G47)` semantics, which only fills
+#      a payback value when cumulative crosses the investment threshold
+#      *between* observed years. If Y1 already covers the investment,
+#      payback < 1 year is reported as 0 (sentinel for "less than one year").
 
-# Replica drift ratchet for Customer B. Step 15 baseline = 10 (AZ OPEX.Y3
-# cascade — single root-cause bug masked by Customer A's ramp). Subsequent
-# steps must DECREASE this number.
-MAX_REPLICA_DRIFT_CUSTOMER_B = 10
+# Replica drift ratchet for Customer B (one-way: only decreases).
+MAX_REPLICA_DRIFT_CUSTOMER_B = 0
 
-# Engine drift ratchet for Customer B. Step 15 baseline = 89 (75 status_quo
-# cells + 14 derivatives). Subsequent steps must DECREASE this number.
-MAX_ENGINE_DRIFT_CUSTOMER_B = 89
+# Engine drift ratchet for Customer B (one-way: only decreases).
+MAX_ENGINE_DRIFT_CUSTOMER_B = 0
 
 # ECIF cells that MUST pass after Step 15 (zero tolerance — these are the
 # Step 15 contract).

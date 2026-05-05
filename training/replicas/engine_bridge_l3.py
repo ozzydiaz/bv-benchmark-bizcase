@@ -146,9 +146,20 @@ def replica_inputs_to_engine_inputs(
         # Pass fractional residual verbatim -- engine field is float to match
         # BA's hand-typed D42. See engine/models.py docstring for rationale.
         num_physical_servers_excl_hosts=excl_hosts,
+        # When BA's hand-typed D42 is SMALLER than what the engine derives
+        # from `num_vms / vm_to_server_ratio` (e.g., a customer with very
+        # high VM-to-host density and a hand-typed override of 65 servers
+        # versus a derived 377.83), the additive residual is clamped to 0
+        # and the engine's est_physical_servers_incl_hosts diverges from
+        # BA. The override field below carries D42 verbatim into the engine
+        # so cabinet count, NW+Fitout, and DC power match BA exactly.
+        est_physical_servers_incl_hosts_override=incl_hosts,
         allocated_vcpu=int(client.allocated_vcpu),
         # Additive residual so engine's est_allocated_pcores_incl_hosts == D47.
         allocated_pcores_excl_hosts=pcores_residual,
+        # Same override pattern as D42, but for D47 (pCores incl. VM hosts).
+        # Required for any customer where D47 < derived `vcpu / vcpu_ratio`.
+        est_allocated_pcores_incl_hosts_override=float(client.allocated_pcores),
         allocated_vmemory_gb=client.allocated_vmem_gb,
         # Additive residual so engine's pmem_gb in _server_acquisition_cost == D52.
         # NOTE: requires engine fix in `_server_acquisition_cost` to actually

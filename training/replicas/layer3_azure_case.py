@@ -141,10 +141,30 @@ def _az_hw_maint(baseline_y0: float, ramp: tuple[float, ...]) -> tuple[float, ..
 def _az_dc_or_bandwidth(
     baseline_y0: float, g: float, ramp: tuple[float, ...]
 ) -> tuple[float, ...]:
-    """DC Lease / DC Power / Bandwidth: growth^t × (1 - eoy[t-1])."""
+    """DC Lease / DC Power / Bandwidth retained-cost decay.
+
+    Mirrors the BA's chained formula in ``Retained Costs Estimation``
+    rows 287/293/295::
+
+        retained[t] = retained[t-1] × (1 + g) × (1 - eoy_ramp[t-1])
+
+    Equivalently::
+
+        retained[t] = baseline_y0 × (1 + g)^t × Π_{k=1..t-1} (1 - eoy_ramp[k])
+
+    For Customer A's ramp pattern (e.g. ``[0.5, 1.0, 1.0, ...]``) the
+    cumulative product collapses to a single factor (every term after the
+    first ``1.0`` is zero), which is why the simpler formula
+    ``(1 - eoy_ramp[t-1])`` happened to match. Customer B has an
+    intermediate ramp ``[0.33, 0.66, 1.0, ...]`` so Y3 needs the full
+    product ``(1-0.33) * (1-0.66)``.
+    """
     out = [baseline_y0]
     for t in range(1, N_YEARS):
-        out.append(baseline_y0 * (1.0 + g) ** t * (1.0 - _prior(ramp, t)))
+        decay = 1.0
+        for k in range(1, t):
+            decay *= 1.0 - ramp[k]
+        out.append(baseline_y0 * (1.0 + g) ** t * decay)
     return tuple(out)
 
 

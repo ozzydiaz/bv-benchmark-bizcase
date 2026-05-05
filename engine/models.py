@@ -149,6 +149,36 @@ class WorkloadInventory(BaseModel):
     pcores_with_sql_server: Optional[float] = None   # defaults to 10% of windows_server if None
     pcores_with_sql_esu: Optional[float] = None       # defaults to 10% of windows_esu if None
 
+    # ------------------------------------------------------------------
+    # Hand-typed BA-workbook overrides for the "incl. VM hosts" totals.
+    #
+    # The BA template lets users hand-type D42 (physical servers incl. hosts)
+    # and D47 (pCores incl. hosts). For some customers these typed values
+    # are SMALLER than what the engine would derive from VM count divided by
+    # vm_to_server_ratio, or vCPU divided by vcpu_per_core_ratio. In that
+    # regime the additive ``*_excl_hosts`` residual cannot be expressed as a
+    # non-negative quantity, so the bridge has no way to make the engine's
+    # derived total match BA verbatim without an explicit override.
+    #
+    # When set, these fields take precedence in the corresponding @property
+    # accessors (`est_physical_servers_incl_hosts`,
+    # `est_allocated_pcores_incl_hosts`) and the engine downstream cost
+    # formulas (network/fitout, DC power, server acquisition) consume the
+    # BA-typed total directly.
+    #
+    # The standard residual fields (`num_physical_servers_excl_hosts`,
+    # `allocated_pcores_excl_hosts`) remain populated for callers that need
+    # the "non-VM-hosts" channel (e.g., backup/DR VM count defaults).
+    # ------------------------------------------------------------------
+    est_physical_servers_incl_hosts_override: Optional[float] = Field(
+        None,
+        description="BA D42 hand-typed total. When set, overrides the derived est_physical_servers_incl_hosts.",
+    )
+    est_allocated_pcores_incl_hosts_override: Optional[float] = Field(
+        None,
+        description="BA D47 hand-typed total. When set, overrides the derived est_allocated_pcores_incl_hosts.",
+    )
+
     @model_validator(mode="after")
     def derive_defaults(self) -> "WorkloadInventory":
         if self.pcores_with_virtualization is None:
@@ -175,11 +205,26 @@ class WorkloadInventory(BaseModel):
 
     @property
     def est_physical_servers_incl_hosts(self) -> float:
-        """Estimated total physical servers including VM hosts (workbook D42 = D39/K11 + D40)."""
+        """Estimated total physical servers including VM hosts (workbook D42 = D39/K11 + D40).
+
+        If `est_physical_servers_incl_hosts_override` is set (BA hand-typed D42),
+        that value takes precedence verbatim. Otherwise we derive it from the
+        VM:host ratio plus the additive non-VM-hosts residual.
+        """
+        if self.est_physical_servers_incl_hosts_override is not None:
+            return float(self.est_physical_servers_incl_hosts_override)
         return self.num_vms / max(self.vm_to_server_ratio, 0.01) + self.num_physical_servers_excl_hosts
 
     @property
     def est_allocated_pcores_incl_hosts(self) -> float:
+        """Estimated total allocated pCores including VM hosts (workbook D47).
+
+        If `est_allocated_pcores_incl_hosts_override` is set (BA hand-typed D47),
+        that value takes precedence verbatim. Otherwise we derive it from the
+        vCPU:pCore ratio plus the additive non-VM-hosts residual.
+        """
+        if self.est_allocated_pcores_incl_hosts_override is not None:
+            return float(self.est_allocated_pcores_incl_hosts_override)
         return self.allocated_vcpu / max(self.vcpu_per_core_ratio, 0.01) + self.allocated_pcores_excl_hosts
 
     @property

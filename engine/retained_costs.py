@@ -118,9 +118,22 @@ def compute(
         lagged_ramp = _combined_ramp(plans, prev_yr)
         lagged_fraction = 1.0 - lagged_ramp
 
-        # DC fraction: Proportional or Static exit type (both use lagged ramp)
+        # ── DC fraction: Proportional or Static exit type ──
+        # Proportional: BA's "Retained Costs Estimation" rows 287/293/295 use
+        # a CHAINED formula that compounds (1 - eoy_ramp) at each year:
+        #
+        #   retained[t] = baseline × (1+g)^t × Π_{k=1..t-1} (1 - eoy_ramp[k])
+        #
+        # For ramps that jump straight to 1.0 in a single year (e.g. Customer A's
+        # [0.5, 1.0, ...]) the chain collapses to the single-factor lagged_fraction,
+        # which is why the simpler formula was historically adequate. For multi-step
+        # ramps (e.g. Customer B's [0.33, 0.66, 1.0, ...]) the cumulative product
+        # is required for parity. Static: physical space exits in lockstep — once
+        # fully ramped, drop to 0; otherwise full cost.
         if dc_exit == "Proportional":
-            dc_fraction = lagged_fraction
+            dc_fraction = 1.0
+            for k in range(1, yr):
+                dc_fraction *= 1.0 - _combined_ramp(plans, k)
         else:  # Static
             dc_fraction = 0.0 if lagged_ramp >= 1.0 else 1.0
 
