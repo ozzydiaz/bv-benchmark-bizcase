@@ -257,7 +257,13 @@ customer.**
 - **Cache migration on first run**: a one-shot copy from
   `.cache/azure_prices_l2/*.json` → `.cache/azure_per_vm/*.json` runs
   during the v1.8 startup if the new directory is empty and the old one
-  has files. No cold-cache penalty for upgrading customers.
+  has files. **Migration policy**: only files within the 7-day staleness
+  budget are copied; files older than 7 days are skipped (next API call
+  or hard-coded `KNOWN_REGIONS` fallback handles them). Migrated files
+  retain their original modification timestamps so the staleness banner
+  shows the correct age. No cold-cache penalty for upgraders with
+  recent caches; explicit (non-silent) cold-fetch for upgraders whose
+  caches were already stale.
 - **Staleness budget**: 7 days. Cache age ≤ 7d → use it (banner notes
   age). Cache age > 7d → treat as missing.
 - Cache-miss / stale + API outage:
