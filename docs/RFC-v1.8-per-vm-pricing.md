@@ -1,10 +1,12 @@
 # RFC — v1.8: Per-VM Azure Retail Price API in the Engine
 
-**Status:** Draft v4 — addresses 5 real architecture issues from RFC v3
-adversarial judge. **Awaiting user approval.**
+**Status:** Draft v4.1 — patches v4 with judge's 3 blocking corrections
+(Linux-filter strictness, error-spec gaps, missing tests) and 4
+non-blocking refinements. **Awaiting user approval.**
 **Date:** 2026-05-05
 **Supersedes:** v1 (deleted, three wrong assumptions), v2 (deleted, four
-blocking issues), v3 (deleted, five real issues from re-vet).
+blocking issues), v3 (deleted, five real issues), v4 (in-place patched
+to v4.1).
 
 ---
 
@@ -47,10 +49,16 @@ path without the standard QA gate.
 
 **What**: Promote the per-VM SKU matching + 5-offer fetch into a new
 `engine/azure_per_vm_pricing.py` module. Both `engine/consumption_builder.py`
-**and** `training/replicas/layer2_ba_replica.py` import from there. The
-replica's "no engine imports" rule remains intact because the shared
-code lives in the engine package, where the replica can read from it
-without crossing layers.
+**and** `training/replicas/layer2_ba_replica.py` import from there.
+
+**Honest framing of the rule change** (per v4 judge feedback): the
+replica's docstring says "no engine imports." v1.8 narrows that rule:
+the replica's **parity-validation logic remains independent** (no engine
+business math), but **API-fetching primitives are now shared** so parity
+testing validates SKU-matching algorithms alone, not API-client
+differences. We are explicitly amending the replica's docstring to:
+*"INDEPENDENT ORACLE for parity logic — no engine business-math imports.
+Shared API-fetching primitives live in `engine/azure_per_vm_pricing.py`."*
 
 **Concretely**:
 - New file `engine/azure_per_vm_pricing.py` exporting:
@@ -132,52 +140,75 @@ wrong** the moment a future user mixes offers.
 when a region is unrecognized, or when a region doesn't sell all 5
 offers. Silent failures are unacceptable with money on the line.
 
-**What** (single rule per failure mode):
+**What** (single rule per failure mode, v4.1 tightened per judge):
 
 | Failure mode | Behaviour |
 | --- | --- |
-| `match_with_retry` returns `None` for a VM (no SKU fits) | Skip the VM; emit a `pricing_warnings` list entry on `ConsumptionPlan` (`{vm_name, reason: "no_sku_match"}`); UI shows the count next to the per-VM detail expander |
-| Region string unknown / misspelled | Raise `ValueError` loudly at builder time; **no silent zero**. Pre-flight validation against [data/region_map.yaml](../data/region_map.yaml) before any API call |
-| 5-offer fetch returns null for one offer (e.g., region doesn't sell SP) | Store `None` on that field of `PerVmPricing`; `compute_for_plan` excludes the row from that offer's column with a footnote (`"sp1y unavailable in N regions"`); never coerced to 0 |
-| API down + cache present | Use cache; banner notes age (`"pricing data is N hours old"`) |
-| API down + cache missing | Empty `per_vm_pricing`; banner says "Azure pricing unavailable — per-VM detail disabled. Engine continues using the BA workbook's PAYG totals." Engine math is unaffected for workbook-based engagements |
+| `match_with_retry` returns `None` for a VM (no SKU fits) | Skip the VM from per-VM 5-tuple; emit a `pricing_warnings` list entry on `ConsumptionPlan` (`{vm_name, reason: "no_sku_match"}`); UI shows count + names. **PAYG fallback**: the dropped VM still contributes to `compute_consumption_y10` via the existing per-vCPU/per-GiB benchmark-rate path in `consumption_builder` (`vcpu_usd_hr=0.048` etc., already used for L2 reference math at [training/replicas/layer2_ba_replica.py:188](../training/replicas/layer2_ba_replica.py#L188)) — no silent under-counting |
+| Region string unknown / misspelled | Pre-flight validation: derive accepted-region set from the **first successful API call's `armRegionName` values** cached at `.cache/azure_per_vm/known_regions.json`; if cache absent, use a hard-coded fallback list of major Azure regions in `engine/azure_per_vm_pricing.py:KNOWN_REGIONS` (uksouth, eastus, eastus2, westus2, westeurope, northeurope, etc. — sourced from `data/region_map.yaml` and `data/azure_vm_catalog.json`). Unknown region → `ValueError` loudly at builder time; **no silent zero** |
+| 5-offer fetch returns null for one offer (e.g., region doesn't sell SP) | Store `None` on that field of `PerVmPricing`. **`compute_for_plan` MUST filter `None` before summing**: `total = sum(getattr(v, attr) or 0.0 for v in plan.per_vm_pricing if getattr(v, attr) is not None)`. Footer disclosure: `"<offer> unavailable in N regions: r1, r2, …"`. Never coerced silently to 0 inside the sum |
+| API down + cache present (within staleness budget) | Use cache; banner notes age (`"pricing data is N hours old"`). **Staleness budget: 7 days.** Cache files older than 7 days are treated as missing (next failure mode triggers) |
+| API down + cache missing or stale | If RVTools-built plan: empty `per_vm_pricing`, fall back to per-vCPU/per-GiB benchmark-rate path (same fallback as no-SKU-match), banner says "Azure pricing unavailable — using benchmark rates; per-VM detail disabled." If workbook plan: untouched (Layer 3 reads `N28/N29/N30/D8` directly anyway) |
 
-### Change 4 — Two new tests beyond v3's three
+### Change 4 — Eleven tests in `tests/test_v18_per_vm_offers.py`
 
-**Why**: RFC v3 had 3 tests, none of which validated either of the two
-load-bearing claims (ACD-PAYG-only invariant; per-VM API total ≈ BA
-workbook total).
+**Why**: RFC v3 had 3 tests; v4 added 2; v4.1 adds the **6 error-path
+tests the judge flagged as missing**.
 
-**What** — `tests/test_v18_per_vm_offers.py` will contain **5 tests**:
-
+**Happy path**:
 1. `ConsumptionPlan` carries non-empty `per_vm_pricing` when built from RVTools.
-2. `compute_for_plan` rows equal `Σ vm.<offer>_usd_yr` to the cent.
-3. Zero-drift constants preserved on both customers.
-4. **(NEW)** ACD guardrail: build a synthetic plan with 2 PAYG + 2
-   RI-3Y VMs, set `acd=0.10`, expect `_assert_acd_safe_to_apply` to
-   raise `ValueError`.
-5. **(NEW)** Per-VM API regression: for Customer A and Customer B,
-   build the per-VM 5-tuple from the API and assert
-   `Σ vm.payg_usd_yr` is within ±2 % of the workbook's `N28` value.
-   This proves the engine's API-built path agrees with what the BA
-   pasted in.
+2. `compute_for_plan` rows equal `Σ filter(None, vm.<offer>_usd_yr)` to the cent.
+3. Zero-drift constants preserved on both customers (`MAX_ENGINE_DRIFT == 0` and `MAX_ENGINE_DRIFT_CUSTOMER_B == 0`).
+4. **ACD guardrail — fail path**: synthetic plan with 2 PAYG + 2 RI-3Y
+   VMs, `acd=0.10`, expect `_assert_acd_safe_to_apply` to raise.
+5. **Per-VM API regression**: for Customer A and B, `Σ vm.payg_usd_yr`
+   within **±0.75 %** of `N28` (matches existing L2 PAYG tolerance of
+   -0.71 %; tightened from v4's lax ±2 %).
+
+**Error-path (NEW in v4.1)**:
+6. **ACD guardrail — happy path**: synthetic plan with all PAYG VMs,
+   `acd=0.10`, expect `_assert_acd_safe_to_apply` to pass and formula
+   yields `Σ vm.payg × (1 − 0.10)`.
+7. **No-SKU-match warning**: synthetic RVTools input with one
+   unmatchable VM, expect `pricing_warnings` populated and that VM's
+   compute still appears in `compute_consumption_y10` via
+   benchmark-rate fallback.
+8. **Unknown region**: build with `region="faketowneast"`, expect
+   `ValueError` from pre-flight validation.
+9. **Null offer in region**: synthetic VM in a region with no SP-1Y,
+   expect `vm.sp1y_usd_yr is None` and `compute_for_plan` SP-1Y row
+   excludes it without crashing.
+10. **API outage + warm cache**: monkeypatch API to raise; cache
+    populated; expect plan built successfully + banner age string.
+11. **`is_linux_sku` filter**: assert `is_linux_sku("Windows Server")` is
+    False; `is_linux_sku("Virtual Machines D-Series Linux")` is True;
+    `is_linux_sku("Virtual Machines")` (neither marker) follows the
+    consolidation rule (see Change 5).
 
 Plus the existing **L2 parity tolerance check** (`-0.71 % PAYG /
 -1.35 % RI-3Y vs Customer A Xa2-fixed`) re-runs after the Change-1
 shared-module move; tolerances unchanged.
 
-### Change 5 — Single Linux-only filter
+### Change 5 — Single Linux-only filter (strict positive check)
 
 **Why**: Two filters today —
 [training/replicas/azure_pricing.py:508-511](../training/replicas/azure_pricing.py#L508-L511)
-(negative: skip if `"Windows" in productName`) and
-[engine/azure_sku_matcher.py:507](../engine/azure_sku_matcher.py#L507)
-(positive: `contains(productName, 'Linux')`). Both work today, but they
-could drift if Azure changes `productName` format.
+(negative: skip if `"Windows" in productName` — permissive) and
+[engine/azure_sku_matcher.py:507](../engine/azure_sku_matcher.py#L503)
+(positive: `contains(productName, 'Linux')` — strict). Both work today,
+but they could drift if Azure changes `productName` format. v4 proposed
+consolidating to the permissive rule; the judge correctly flagged that
+any Azure SKU that happens to contain neither marker would silently
+leak through under permissive semantics.
 
-**What**: New `engine/azure_per_vm_pricing.py:is_linux_sku(product_name)`
-with one rule (negative check, more permissive: skip if "Windows" in
-name). Both `azure_sku_matcher.py` and the replica use this helper.
+**What** (v4.1 corrected per judge): New
+`engine/azure_per_vm_pricing.py:is_linux_sku(product_name)` with the
+**strict positive rule** — accept only items where `"Linux" in product_name`.
+This preserves `engine/azure_sku_matcher.py`'s current behaviour
+exactly (no semantic change there) and tightens the L2 replica's path
+(today permissive → strict). If a future Azure SKU has a non-Linux
+non-Windows marker that the BA needs included, that's a one-line
+amendment to the helper, gated by an explicit test.
 
 ---
 
@@ -223,9 +254,16 @@ customer.**
 - Existing 24-hour disk cache at `.cache/azure_prices_l2/`
   ([training/replicas/azure_pricing.py:24-29](../training/replicas/azure_pricing.py#L24-L29)),
   moves to `.cache/azure_per_vm/` after Change 1.
-- Stale-cache disclosure mandatory; never silent.
-- Cache-miss + API-outage → empty `per_vm_pricing`, explicit banner,
-  engine continues serving workbook-based plans unaffected.
+- **Cache migration on first run**: a one-shot copy from
+  `.cache/azure_prices_l2/*.json` → `.cache/azure_per_vm/*.json` runs
+  during the v1.8 startup if the new directory is empty and the old one
+  has files. No cold-cache penalty for upgrading customers.
+- **Staleness budget**: 7 days. Cache age ≤ 7d → use it (banner notes
+  age). Cache age > 7d → treat as missing.
+- Cache-miss / stale + API outage:
+  * RVTools-built plan → benchmark-rate fallback (per-vCPU/per-GiB),
+    banner says "Azure pricing unavailable — using benchmark rates."
+  * Workbook plan → untouched (Layer 3 reads workbook directly).
 
 ---
 
@@ -247,14 +285,17 @@ customer.**
 | L3 parity regresses on either customer | BLOCKING | Layer 3 reads workbook directly — invariant by design |
 | L2 PAYG / RI-3Y aggregates regress beyond existing tolerance | HIGH | Re-run L2 parity suite after Change 1 module move; tolerances unchanged |
 | ACD silently mis-applied on heterogeneous offer mix | HIGH | Change 2 guardrail raises `ValueError` until v2.0 |
-| Engine→replica circular import | HIGH | Change 1 promotes shared code into `engine/`; replica only re-exports |
+| Engine→replica circular import | HIGH | Change 1 promotes shared code into `engine/`; replica only re-exports API primitives, not business math |
+| Replica imports from `engine/` (replica docstring rule narrowing) | MEDIUM | v1.8 explicitly amends replica docstring: "INDEPENDENT for parity logic; shared API primitives live in `engine/azure_per_vm_pricing.py`" |
 | Removing flat-% fields breaks any consumer outside `pricing_offers.py` | MEDIUM | Grep-verified: only `pricing_offers.py` reads them; `data/benchmarks_default.yaml` does NOT list them |
-| API outage during build | MEDIUM | 24h cache absorbs short outages; explicit fallback banner for cache-miss + outage; engine math unaffected for workbook-based engagements |
-| `match_with_retry` returns None for a VM | MEDIUM | Skip + warning row; no silent zero |
-| Region string unknown / misspelled | MEDIUM | Pre-flight against `data/region_map.yaml`; loud `ValueError` |
-| 5-tuple has nulls (offer not sold in region) | LOW | Stored as `None`; row excluded with footnote |
+| Saved v1.7 user-input JSON / YAML carries `ri_*_discount` keys | LOW-MEDIUM | Pydantic `model_config = ConfigDict(extra="ignore")` on `BenchmarkConfig`; v1.7 keys silently dropped on load |
+| API outage during build | MEDIUM | 24h cache + 7-day staleness budget; benchmark-rate fallback for RVTools; banner for any non-fresh state |
+| Cache directory rename (`azure_prices_l2` → `azure_per_vm`) cold-cache hit | LOW-MEDIUM | One-shot copy migration on first v1.8 run (Change 3) |
+| `match_with_retry` returns None for a VM | MEDIUM | Skip from 5-tuple + warning row + benchmark-rate fallback; no silent under-count |
+| Region string unknown / misspelled | MEDIUM | Pre-flight against `KNOWN_REGIONS` set + cached `armRegionName` values; loud `ValueError` |
+| 5-tuple has nulls (offer not sold in region) | LOW | Stored as `None`; `compute_for_plan` filters None before sum; footnote |
 | `ConsumptionPlan` schema bump breaks deserialization of old saved plans | LOW | New fields default to `[]`; pydantic accepts missing |
-| Windows-licensed prices contaminate per-VM totals | LOW | Single `is_linux_sku` helper; one rule both paths share |
+| Windows-licensed prices contaminate per-VM totals | LOW | Strict `is_linux_sku` helper (`'Linux' in productName`); one rule both paths share |
 | Linux filter divergence under future Azure API changes | LOW | Single helper (Change 5) ends dual-filter risk |
 
 ---
