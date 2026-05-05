@@ -7,21 +7,12 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ## Roadmap (forward backlog — not yet released)
 
-### v1.5.1 — Streamlit polish (in progress, Steps 13a–13f)
-- ✅ **13a** Scenario export — PPTX slide 3 + XLSX `Scenario_Comparison` sheet + hidden `_Audit` sheet (commit `b8d3f4e`)
-- ✅ **13b** L3 advanced — depreciation life + HW renewal + ramp-formula explainer + payback edge-case label (commit `14b4b66`)
-- ✅ **13c** vMemory annotation — BA D49/D50/D52 reconciliation block at L1 checkpoint (commit `e518e66`)
-- ✅ **13d** Backup/DR scope-inclusion checkboxes in L2 override panel (commit `1031f0f`)
-- ✅ **13e** Quick wins — Gordon TV formula help, RI/SP financial-case clarification at BA-Approval Gate, results audit banner (commit `057466e`)
-- ✅ **13f** Per-VM breadcrumb from L2 anomaly list to BA-approval citations (commit `772c74f`)
-- ⬜ **15**  Validate against second customer BA-completed workbook (pending customer-supplied file)
-
 ### v1.6 — Configurable Terminal Value (engine refactor, low-risk)
 - Expose `tv_method: "gordon" | "exit_multiple" | "none"` enum on `BenchmarkConfig`. Default stays `"gordon"` so existing customers see no change.
 - Add `tv_floor_at_zero: bool = False` flag — when True, `_terminal_value` returns `max(0, tv)` so a negative-savings perpetuity cannot drag NPV further negative.
 - Surface `perpetual_growth_rate` in the L3 override panel (currently only on benchmarks page) so BAs can sensitivity-test g during scenario building.
-- **Risk:** any change to `engine/outputs.py:_terminal_value` re-opens Layer 3 parity. Must rerun the 29 parity tests against Customer A AND new Customer B (Step 15) before merge. Adversarial Explore review required before any code change.
-- **Trigger:** finish Step 15 with second customer at zero drift first.
+- **Risk:** any change to `engine/outputs.py:_terminal_value` re-opens Layer 3 parity. Must rerun the layer3 parity tests against Customer A AND Customer B before merge. Adversarial Explore review required before any code change.
+- **Trigger:** ✅ Satisfied by v1.5.1 (`7fe9f41`) — both customers at `MAX_ENGINE_DRIFT = 0`.
 
 ### v1.7 — RI/SP-blended Azure pricing (engine refactor, medium-risk)
 - Phase 2 from the May 2026 risk analysis: derive `effective_acd` as a family-blended weighted average from the BA workbook's D156/D157/D163-D166 cells:
@@ -41,6 +32,48 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ### v2.0 — Per-VM RI/SP allocation (deferred)
 See v1.7 deferred section. Earliest planning after v1.7 ships and is validated.
+
+---
+
+## v1.5.1 — Customer B Zero Drift + Streamlit Polish
+**Commits:** `b8d3f4e` … `7fe9f41` | **Tag:** `v1.5.1-customer-b-zero-drift` | **Date:** 2026-05-05 | **Tests:** 35 layer3 parity ✅ (Customer A 395/395 + Customer B 395/395) + 31 privacy/parity gate ✅
+
+### What changed
+
+Two-customer zero-drift baseline established. `MAX_ENGINE_DRIFT_CUSTOMER_B = 0`
+is now locked into `tests/test_layer3_parity.py` alongside the original
+`MAX_ENGINE_DRIFT = 0`. Any future regression on either customer is a hard CI fail.
+
+### Step 13 — Streamlit polish (released incrementally)
+- **13a** Scenario export — PPTX slide 3 + XLSX `Scenario_Comparison` sheet + hidden `_Audit` sheet (commit `b8d3f4e`)
+- **13b** L3 advanced — depreciation life + HW renewal + ramp-formula explainer + payback edge-case label (commit `14b4b66`)
+- **13c** vMemory annotation — BA D49/D50/D52 reconciliation block at L1 checkpoint (commit `e518e66`)
+- **13d** Backup/DR scope-inclusion checkboxes in L2 override panel (commit `1031f0f`)
+- **13e** Quick wins — Gordon TV formula help, RI/SP financial-case clarification at BA-Approval Gate, results audit banner (commit `057466e`)
+- **13f** Per-VM breadcrumb from L2 anomaly list to BA-approval citations (commit `772c74f`)
+
+### Step 15 — Customer B onboarding + zero drift
+
+| Step | Commit | Replica drift | Engine drift | Fix |
+|------|--------|---------------|--------------|-----|
+| 15 (init) | `cf2d734` | 10 | 89 | Customer B ECIF wiring (NET migration + funding split) |
+| **15.1** | **`7fe9f41`** | **10 → 0** | **89 → 0** | Four bug fixes (below) |
+
+**Four fixes in 15.1 (all were Customer-A-pattern-bias artifacts that hid behind Customer A's single-step ramp):**
+
+1. **`training/replicas/layer3_azure_case.py`** — `_az_dc_or_bandwidth()` rewritten to use BA's chained product `retained[t] = baseline_y0 × (1+g)^t × Π_{k=1..t-1}(1 − eoy_ramp[k])`. Prior single-factor decay matched Customer A only because A had a single-step ramp. Customer B's multi-step ramp exposed the bug.
+2. **`engine/retained_costs.py`** — Same chained-product fix on the Proportional `dc_exit` branch (`dc_fraction = 1.0; for k in range(1, yr): dc_fraction *= 1.0 − _combined_ramp(plans, k)`). Static branch unchanged.
+3. **`engine/models.py:WorkloadInventory` + `training/replicas/engine_bridge_l3.py`** — Added `est_physical_servers_incl_hosts_override` and `est_allocated_pcores_incl_hosts_override` fields. Bridge populates them from BA's hand-typed `D42` / `D47` so the engine respects BA values even when smaller than the derived (`num_vms / vm_to_server_ratio + num_physical_servers_excl_hosts`) value. Customer B has D42=65 vs derived 377.83 and D47=4004 vs derived 4044 — both would have been clamped away by the prior `≥0 residual` logic.
+4. **`engine/outputs.py:compute_cf_roi_and_payback`** — Payback loop now matches BA's between-year-crossing semantics: only fills payback values when cumulative discounted savings cross the investment threshold *between* observed years (`yr ≥ 2 AND prev_cum < investment_npv AND cum_yr ≥ investment_npv`). Y1-already-covers returns 0 (sentinel for "less than 1 year"), matching `5Y CF with Payback!I32 = SUM(C47:G47)`.
+
+### Layer 3 invariants (NEVER REGRESS — applies to BOTH customers)
+
+All v1.5.0 invariants carry forward, plus:
+
+- `MAX_ENGINE_DRIFT_CUSTOMER_B = 0` in `tests/test_layer3_parity.py`.
+- Retained-cost decay must use **chained product** of `(1 − eoy_ramp[k])`, not a single factor.
+- Bridge must preserve BA's hand-typed `D42` / `D47` via `*_incl_hosts_override` fields, not derive-and-clamp.
+- Payback semantics: between-year crossing only; Y1-already-covers returns 0 (sentinel).
 
 ---
 
