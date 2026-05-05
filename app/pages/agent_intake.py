@@ -937,11 +937,21 @@ def _render_l3_override() -> None:
             st.session_state["_l3ov_hw_renewal"] = (
                 st.session_state.get("_l3ov_hw_renewal_pct", 10) / 100.0
             )
-            hl3.markdown(
-                f"<small>Perpetual growth rate (Gordon TV): "
-                f"<b>{bm.perpetual_growth_rate:.1%}</b><br/>"
-                f"Adjust in <i>Step 3 · Benchmark Assumptions</i>.</small>",
-                unsafe_allow_html=True,
+            hl3.slider(
+                "Perpetual growth rate (Gordon g) %",
+                min_value=0,
+                max_value=10,
+                value=int(round(bm.perpetual_growth_rate * 100)),
+                step=1,
+                key="_l3ov_growth_pct",
+                help=(
+                    "Long-run growth rate `g` used in the Gordon Growth terminal value "
+                    "`TV = savings[N] × (1 + g) / (WACC − g)`. Default 3% matches the BA "
+                    "workbook. Higher `g` raises NPV-with-TV; if `g ≥ WACC` the engine "
+                    "guards by setting TV = 0. Sensitivity-test in the 0–5% band — "
+                    "values above the WACC are economically meaningless. "
+                    "Only affects the P&L NPV-with-TV figure; CF NPV and payback are unchanged."
+                ),
             )
 
         # ---------- Migration ramp formula explainer ----------
@@ -996,7 +1006,13 @@ def _render_l3_override() -> None:
         sc1, sc2 = st.columns(2)
         with sc1:
             if st.button("↺ Update base scenario", key="_rerun_l3_base"):
-                bm_new = BenchmarkConfig(**{**bm.model_dump(), "wacc": wacc_pct})
+                bm_new = BenchmarkConfig(**{
+                    **bm.model_dump(),
+                    "wacc": wacc_pct,
+                    "perpetual_growth_rate": st.session_state.get(
+                        "_l3ov_growth_pct", int(round(bm.perpetual_growth_rate * 100))
+                    ) / 100.0,
+                })
                 result = _run_layer3(aco, ecif, int(dc_exit), bm_new, label="Base (updated)")
                 if result:
                     st.session_state["_l3_result"]     = result
@@ -1006,7 +1022,13 @@ def _render_l3_override() -> None:
                     st.rerun()
         with sc2:
             if st.button(f"➕ Add comparison: {scenario_name}", key="_add_scenario"):
-                bm_new = BenchmarkConfig(**{**bm.model_dump(), "wacc": wacc_pct})
+                bm_new = BenchmarkConfig(**{
+                    **bm.model_dump(),
+                    "wacc": wacc_pct,
+                    "perpetual_growth_rate": st.session_state.get(
+                        "_l3ov_growth_pct", int(round(bm.perpetual_growth_rate * 100))
+                    ) / 100.0,
+                })
                 result = _run_layer3(aco, ecif, int(dc_exit), bm_new, label=scenario_name)
                 if result:
                     st.session_state["_l3_scenarios"] = scenarios + [result]

@@ -63,9 +63,6 @@ def _has_tv_floor() -> bool:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed: BenchmarkConfig.tv_method missing"
-)
 def test_ac1_tv_method_enum_present():
     """AC-1: ``tv_method`` field exists with the documented enum values."""
     from engine.models import BenchmarkConfig
@@ -77,9 +74,6 @@ def test_ac1_tv_method_enum_present():
         BenchmarkConfig(tv_method=method)
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed: BenchmarkConfig.tv_method missing"
-)
 def test_ac2_default_is_gordon():
     """AC-2: default ``tv_method`` MUST be ``"gordon"`` for back-compat."""
     from engine.models import BenchmarkConfig
@@ -95,9 +89,6 @@ def test_ac2_default_is_gordon():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed"
-)
 def test_ac3_gordon_matches_legacy_formula(default_benchmarks):
     """AC-3: 'gordon' must reproduce ``_terminal_value`` to the cent."""
     from engine.outputs import _terminal_value
@@ -106,30 +97,25 @@ def test_ac3_gordon_matches_legacy_formula(default_benchmarks):
     cf_last, wacc, g = 1_000_000.0, bm.wacc, bm.perpetual_growth_rate
 
     legacy = cf_last * (1 + g) / (wacc - g)
-    actual = _terminal_value(cf_last, wacc, g)  # signature may grow a `bm=` param
+    actual = _terminal_value(cf_last, wacc, g, bm)
     assert abs(actual - legacy) < 0.01, (
         f"'gordon' regressed the legacy Gordon Growth formula: "
         f"expected {legacy:,.2f} got {actual:,.2f}"
     )
+    # Back-compat: omitting bm must still produce the legacy Gordon result
+    # so any pre-v1.6 caller (or test) sees identical numbers.
+    assert abs(_terminal_value(cf_last, wacc, g) - legacy) < 0.01
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed"
-)
 def test_ac4_none_returns_zero(default_benchmarks):
     """AC-4: ``tv_method='none'`` MUST contribute 0 to NPV."""
     from engine.outputs import _terminal_value
 
     bm = default_benchmarks.model_copy(update={"tv_method": "none"})
-    # Signature is expected to grow a benchmarks/method-aware path.
-    # Until then this test is skipped above.
-    tv = _terminal_value(1_000_000.0, bm.wacc, bm.perpetual_growth_rate)  # call site TBD
+    tv = _terminal_value(1_000_000.0, bm.wacc, bm.perpetual_growth_rate, bm)
     assert tv == 0.0, "tv_method='none' must short-circuit to 0"
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed"
-)
 def test_ac5_exit_multiple_uses_configured_multiple(default_benchmarks):
     """AC-5: ``tv_method='exit_multiple'`` returns cf_last × multiple."""
     from engine.outputs import _terminal_value
@@ -139,7 +125,7 @@ def test_ac5_exit_multiple_uses_configured_multiple(default_benchmarks):
     )
     cf_last = 1_000_000.0
     expected = cf_last * 8.0
-    actual = _terminal_value(cf_last, bm.wacc, bm.perpetual_growth_rate)
+    actual = _terminal_value(cf_last, bm.wacc, bm.perpetual_growth_rate, bm)
     assert abs(actual - expected) < 0.01, (
         f"exit_multiple TV broken: expected {expected:,.2f} got {actual:,.2f}"
     )
@@ -150,10 +136,6 @@ def test_ac5_exit_multiple_uses_configured_multiple(default_benchmarks):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _has_tv_floor(),
-    reason="v1.6 not landed: BenchmarkConfig.tv_floor_at_zero missing",
-)
 def test_ac6_floor_clips_negative_tv(default_benchmarks):
     """AC-6: ``tv_floor_at_zero=True`` MUST clip a negative perpetuity to 0.
 
@@ -166,10 +148,18 @@ def test_ac6_floor_clips_negative_tv(default_benchmarks):
 
     bm = default_benchmarks.model_copy(update={"tv_floor_at_zero": True})
     cf_last = -500_000.0  # negative final-year cash flow
-    tv = _terminal_value(cf_last, bm.wacc, bm.perpetual_growth_rate)
+    tv = _terminal_value(cf_last, bm.wacc, bm.perpetual_growth_rate, bm)
     assert tv >= 0.0, (
         f"tv_floor_at_zero=True did not clip negative TV (got {tv:,.2f}). "
         f"Negative perpetuity is almost never the right model — see risk analysis."
+    )
+    # Sanity: without the flag the same scenario still produces a negative TV,
+    # confirming the flag actually does the work (vs the formula returning >=0
+    # for some unrelated reason such as wacc<=g triggering the 0 short-circuit).
+    bm_no_floor = default_benchmarks.model_copy(update={"tv_floor_at_zero": False})
+    assert (
+        _terminal_value(cf_last, bm_no_floor.wacc, bm_no_floor.perpetual_growth_rate, bm_no_floor)
+        < 0.0
     )
 
 
@@ -178,9 +168,6 @@ def test_ac6_floor_clips_negative_tv(default_benchmarks):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(
-    not _has_tv_method(), reason="v1.6 not landed"
-)
 def test_ac7_defaults_preserve_layer3_parity():
     """AC-7: Customer A 3-way audit MUST stay at zero engine drift when
     v1.6 is enabled with defaults (``tv_method='gordon'``, floor off).

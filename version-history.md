@@ -7,13 +7,6 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ## Roadmap (forward backlog — not yet released)
 
-### v1.6 — Configurable Terminal Value (engine refactor, low-risk)
-- Expose `tv_method: "gordon" | "exit_multiple" | "none"` enum on `BenchmarkConfig`. Default stays `"gordon"` so existing customers see no change.
-- Add `tv_floor_at_zero: bool = False` flag — when True, `_terminal_value` returns `max(0, tv)` so a negative-savings perpetuity cannot drag NPV further negative.
-- Surface `perpetual_growth_rate` in the L3 override panel (currently only on benchmarks page) so BAs can sensitivity-test g during scenario building.
-- **Risk:** any change to `engine/outputs.py:_terminal_value` re-opens Layer 3 parity. Must rerun the layer3 parity tests against Customer A AND Customer B before merge. Adversarial Explore review required before any code change.
-- **Trigger:** ✅ Satisfied by v1.5.1 (`7fe9f41`) — both customers at `MAX_ENGINE_DRIFT = 0`.
-
 ### v1.7 — RI/SP-blended Azure pricing (engine refactor, medium-risk)
 - Phase 2 from the May 2026 risk analysis: derive `effective_acd` as a family-blended weighted average from the BA workbook's D156/D157/D163-D166 cells:
   ```
@@ -32,6 +25,51 @@ Dates are commit dates (Pacific Time). Test counts reflect the state at each com
 
 ### v2.0 — Per-VM RI/SP allocation (deferred)
 See v1.7 deferred section. Earliest planning after v1.7 ships and is validated.
+
+---
+
+## v1.6 — Configurable Terminal Value (engine refactor, low-risk)
+**Date:** 2026-05-05 | **Tests:** 7 v1.6 acceptance ✅ + 35 layer3 parity ✅ (Customer A + Customer B both 395/395, zero drift preserved)
+
+### What changed
+
+`engine/outputs.py:_terminal_value` is now method-aware. Three `BenchmarkConfig`
+fields gate the new behavior, all opt-in:
+
+| Field | Type | Default | Effect |
+|-------|------|---------|--------|
+| `tv_method` | `Literal["gordon","exit_multiple","none"]` | `"gordon"` | Selects formula |
+| `tv_floor_at_zero` | `bool` | `False` | Clip negative TV to 0 |
+| `tv_exit_multiple` | `float` | `8.0` | Multiple used by `exit_multiple` |
+
+* **`"gordon"`** (default) — `cf_last × (1+g) / (wacc − g)`. Bit-identical to the v1.5.x formula. Layer-3 parity preserved on **both** customers.
+* **`"exit_multiple"`** — `cf_last × tv_exit_multiple`. Comparable-transaction style.
+* **`"none"`** — returns 0. Useful for "no-perpetuity" sensitivity runs.
+* **`tv_floor_at_zero=True`** — clips negative TV to 0. Protects scenarios where Y10 cash flow dips negative (e.g. ECIF runoff) from a perpetual-loss assumption dragging NPV down.
+
+### UI
+
+The L3 override panel (`app/pages/agent_intake.py`) gained a **Perpetual growth rate (Gordon g) %** slider in the Hardware Lifecycle expander, alongside the existing depreciation-life and HW-renewal controls. Range 0–10%; engine guards at `g ≥ wacc` by setting TV = 0. The slider feeds both the *Update base* and *Add comparison* scenario buttons.
+
+### Back-compat
+
+Existing callers of `_terminal_value(cf_last, wacc, g)` (no 4th arg) continue
+to receive the legacy Gordon Growth result — the new `benchmarks` parameter is
+optional. AC-3 in `tests/test_v16_tv_method_scaffold.py` asserts this explicitly.
+
+### Layer 3 invariants (NEVER REGRESS)
+
+All v1.5.0 + v1.5.1 invariants carry forward, plus:
+
+- Default `tv_method` MUST stay `"gordon"`. Changing the default silently
+  breaks Layer 3 parity for every existing customer.
+- Default `tv_floor_at_zero` MUST stay `False`. The BA workbook does **not**
+  floor negative TV; flooring would re-open parity drift on any customer
+  whose Y10 dips negative.
+- The 7 acceptance tests in `tests/test_v16_tv_method_scaffold.py` (AC-1
+  through AC-7) are the v1.6 contract; AC-7 re-imports `MAX_ENGINE_DRIFT`
+  from `tests/test_layer3_parity.py` so any PR that bumps the ratchet is
+  caught at code review.
 
 ---
 

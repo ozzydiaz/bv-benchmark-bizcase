@@ -9,7 +9,7 @@ a valid business case.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -422,6 +422,22 @@ class BenchmarkConfig(BaseModel):
 
     # Financial
     perpetual_growth_rate: float = 0.03
+
+    # Terminal-value method (v1.6 — opt-in alternates; default preserves Layer 3 parity)
+    # ``"gordon"``         : Gordon Growth perpetuity — ``cf_last × (1+g) / (wacc - g)``.
+    #                        DEFAULT. Matches BA workbook and Layer 3 oracle.
+    # ``"exit_multiple"``  : Comparable-transaction TV — ``cf_last × tv_exit_multiple``.
+    # ``"none"``           : No terminal value — TV contribution is 0.
+    tv_method: Literal["gordon", "exit_multiple", "none"] = "gordon"
+    # When True, clip a negative perpetuity to 0 so a single negative final-year
+    # cash flow cannot drag NPV further negative via a perpetual-loss assumption.
+    # Off by default — turning this on shifts NPV upward and would re-open Layer 3
+    # parity if applied to the BA-truth scenario.
+    tv_floor_at_zero: bool = False
+    # EBITDA / cash-flow multiple used when ``tv_method == "exit_multiple"``.
+    # 8.0 is a common mid-cap tech / IT-services rule-of-thumb; sites running
+    # ``"exit_multiple"`` should override based on industry comparables.
+    tv_exit_multiple: float = 8.0
 
     # Right-sizing parameters
     # Per-VM rightsizing.  When a VM has utilisation telemetry (vCPU.Overall/Max

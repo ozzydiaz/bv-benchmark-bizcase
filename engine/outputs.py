@@ -179,11 +179,42 @@ def _npv(cash_flows: list[float], wacc: float, years: int = YEARS) -> float:
     return total
 
 
-def _terminal_value(cf_last: float, wacc: float, growth_rate: float) -> float:
-    """Gordon Growth Model terminal value."""
-    if wacc <= growth_rate:
-        return 0.0
-    return cf_last * (1 + growth_rate) / (wacc - growth_rate)
+def _terminal_value(
+    cf_last: float,
+    wacc: float,
+    growth_rate: float,
+    benchmarks: BenchmarkConfig | None = None,
+) -> float:
+    """Terminal value selector.
+
+    By default (``benchmarks`` omitted, or ``benchmarks.tv_method == "gordon"``)
+    this returns the Gordon Growth perpetuity ``cf_last × (1+g) / (wacc - g)``,
+    matching the BA workbook and the Layer-3 zero-drift oracle.
+
+    v1.6 alternate methods (opt-in via ``BenchmarkConfig.tv_method``):
+
+    * ``"gordon"``         — Gordon Growth perpetuity (default; back-compat).
+    * ``"exit_multiple"``  — ``cf_last × benchmarks.tv_exit_multiple``.
+    * ``"none"``           — no terminal value (returns 0).
+
+    When ``benchmarks.tv_floor_at_zero`` is True the result is clipped to ``≥ 0``.
+    """
+    method = "gordon" if benchmarks is None else benchmarks.tv_method
+
+    if method == "none":
+        tv = 0.0
+    elif method == "exit_multiple":
+        multiple = 8.0 if benchmarks is None else benchmarks.tv_exit_multiple
+        tv = cf_last * multiple
+    else:  # "gordon" (default)
+        if wacc <= growth_rate:
+            tv = 0.0
+        else:
+            tv = cf_last * (1 + growth_rate) / (wacc - growth_rate)
+
+    if benchmarks is not None and benchmarks.tv_floor_at_zero and tv < 0.0:
+        tv = 0.0
+    return tv
 
 
 def _payback(cumulative_savings: list[float]) -> float | None:
@@ -227,9 +258,9 @@ def compute(
     summary.npv_10yr = _npv(savings, wacc, YEARS)
     summary.npv_5yr = _npv(savings, wacc, 5)
 
-    tv = _terminal_value(savings[YEARS], wacc, g)
+    tv = _terminal_value(savings[YEARS], wacc, g, benchmarks)
     tv_discounted = tv / (1 + wacc) ** YEARS
-    tv_5yr_discounted = _terminal_value(savings[5], wacc, g) / (1 + wacc) ** 5
+    tv_5yr_discounted = _terminal_value(savings[5], wacc, g, benchmarks) / (1 + wacc) ** 5
 
     # terminal_value stored as the PV (discounted to today) — matches workbook C8
     summary.terminal_value = tv_discounted
